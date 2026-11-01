@@ -176,7 +176,102 @@ function freeFen(free) {
     if (empty) text += empty;
     rows.push(text);
   }
-  return rows.join('/') + ' ' + free.turn + ' - - 0 1';
+  return rows.join('/') + ' ' + free.turn + ' ' +
+    (free.castling || '-') + ' ' + (free.ep || '-') + ' 0 1';
+}
+function freePieceColor(piece) {
+  return !piece ? null : piece === piece.toUpperCase() ? 'w' : 'b';
+}
+
+// These are pseudo-legal CHESS moves: normal piece geometry, blocking,
+// captures, pawn rules, promotion and castling. Only king-safety checks
+// are omitted. Moving into check, ignoring check and capturing a king
+// are intentionally allowed. Both colours still take alternating turns.
+function freePseudoMoves(free) {
+  const board = free.board;
+  const color = free.turn;
+  const files = 'abcdefgh';
+  const moves = [];
+  const friendly = square => freePieceColor(board[square]) === color;
+  const enemy = square => !!board[square] && !friendly(square);
+  const onBoard = (x, y) => x >= 0 && x < 8 && y >= 1 && y <= 8;
+  const squareAt = (x, y) => files[x] + y;
+
+  for (const [from, piece] of Object.entries(board)) {
+    if (freePieceColor(piece) !== color) continue;
+    const x = files.indexOf(from[0]);
+    const y = Number(from[1]);
+    const type = piece.toLowerCase();
+    const add = (to, flag = '') => {
+      if (!to || friendly(to)) return;
+      if (type === 'p' && Number(to[1]) === (color === 'w' ? 8 : 1)) {
+        for (const promotion of ['q', 'r', 'b', 'n']) moves.push({from, to, promotion, flag});
+      } else moves.push({from, to, promotion:'', flag});
+    };
+    const step = (dx, dy, slide = false) => {
+      for (let nx = x + dx, ny = y + dy; onBoard(nx, ny); nx += dx, ny += dy) {
+        const to = squareAt(nx, ny);
+        if (friendly(to)) break;
+        add(to);
+        if (board[to] || !slide) break;
+      }
+    };
+
+    if (type === 'p') {
+      const forward = color === 'w' ? 1 : -1;
+      const frontY = y + forward;
+      if (onBoard(x, frontY)) {
+        const front = squareAt(x, frontY);
+        if (!board[front]) {
+          add(front);
+          const start = color === 'w' ? 2 : 7;
+          const secondY = y + 2 * forward;
+          if (y === start && onBoard(x, secondY)) {
+            const second = squareAt(x, secondY);
+            if (!board[second]) add(second);
+          }
+        }
+        for (const dx of [-1, 1]) {
+          if (!onBoard(x + dx, frontY)) continue;
+          const to = squareAt(x + dx, frontY);
+          if (enemy(to)) add(to);
+          else if (!board[to] && to === free.ep) {
+            const capturedSquare = files[x + dx] + y;
+            if (board[capturedSquare] === (color === 'w' ? 'p' : 'P')) {
+              add(to, 'ep');
+            }
+          }
+        }
+      }
+    } else if (type === 'n') {
+      for (const [dx, dy] of [[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]]) {
+        if (onBoard(x + dx, y + dy)) add(squareAt(x + dx, y + dy));
+      }
+    } else if (type === 'b' || type === 'r' || type === 'q') {
+      const diagonal = [[1,1],[-1,1],[1,-1],[-1,-1]];
+      const straight = [[1,0],[-1,0],[0,1],[0,-1]];
+      const vectors = type === 'b' ? diagonal : type === 'r' ? straight : [...diagonal, ...straight];
+      for (const [dx, dy] of vectors) step(dx, dy, true);
+    } else if (type === 'k') {
+      for (const dx of [-1,0,1]) for (const dy of [-1,0,1]) {
+        if ((dx || dy) && onBoard(x+dx,y+dy)) add(squareAt(x+dx,y+dy));
+      }
+      // Castling uses regular empty squares and rook positions. In free
+      // mode we deliberately do NOT forbid castling through check.
+      const home = color === 'w' ? '1' : '8';
+      if (from === 'e' + home) {
+        const rights = free.castling || '';
+        const kingRight = color === 'w' ? 'K' : 'k';
+        const queenRight = color === 'w' ? 'Q' : 'q';
+        const rook = color === 'w' ? 'R' : 'r';
+        if (rights.includes(kingRight) && board['h'+home] === rook &&
+            !board['f'+home] && !board['g'+home]) add('g'+home, 'castle');
+        if (rights.includes(queenRight) && board['a'+home] === rook &&
+            !board['b'+home] && !board['c'+home] && !board['d'+home]) add('c'+home, 'castle');
+      }
+    }
+  }
+  return moves;
 }
 function freeCaptureHistory(room) {
   return room.freedom ? room.freedom.captures : capturedPieces(room);
@@ -184,26 +279,58 @@ function freeCaptureHistory(room) {
 function moveFreely(room, color, from, to, promotion) {
   const free = room.freedom;
   if (!free || from === to) throw new Error('Выбери другую клетку.');
+  if (free.turn !== color) throw new Error('Сейчас не твой ход.');
   const piece = free.board[from];
-  if (!piece) throw new Error('На исходной клетке нет фигуры.');
-  const owned = (piece === piece.toUpperCase() ? 'w' : 'b');
-  if (owned !== color || free.turn !== color) throw new Error('Сейчас не твой ход.');
-  const victim = free.board[to];
-  if (victim && (victim === victim.toUpperCase() ? 'w' : 'b') === color) {
-    throw new Error('Нельзя съесть свою фигуру.');
+  if (!piece || freePieceColor(piece) !== color) {
+    throw new Error('Выбери свою фигуру.');
   }
-  if (victim) free.captures[victim === victim.toUpperCase() ? 'w' : 'b'].push(victim.toLowerCase());
+  const move = freePseudoMoves(free).find(candidate =>
+    candidate.from === from && candidate.to === to &&
+    (!candidate.promotion || candidate.promotion === promotion)
+  );
+  if (!move) throw new Error('Фигура не может так ходить. Шах можно игнорировать, но правила движения фигур сохраняются.');
+
+  const capturedSquare = move.flag === 'ep' ? to[0] + from[1] : to;
+  const captured = free.board[capturedSquare];
+  if (captured) {
+    const victim = freePieceColor(captured);
+    free.captures[victim].push(captured.toLowerCase());
+  }
   delete free.board[from];
-  const rank = to[1];
-  const promotionRank = color === 'w' ? '8' : '1';
-  const promoting = piece.toLowerCase() === 'p' && rank === promotionRank;
-  const newType = ['q','r','b','n'].includes(promotion) ? promotion : 'q';
-  free.board[to] = promoting ? (color === 'w' ? newType.toUpperCase() : newType) : piece;
-  const notation = piece.toUpperCase() + from + (victim ? 'x' : '–') + to +
-    (promoting ? '=' + newType.toUpperCase() : '');
+  if (captured) delete free.board[capturedSquare];
+  free.board[to] = move.promotion
+    ? (color === 'w' ? move.promotion.toUpperCase() : move.promotion)
+    : piece;
+  if (move.flag === 'castle') {
+    const rank = from[1];
+    const rookFrom = (to[0] === 'g' ? 'h' : 'a') + rank;
+    const rookTo = (to[0] === 'g' ? 'f' : 'd') + rank;
+    free.board[rookTo] = free.board[rookFrom];
+    delete free.board[rookFrom];
+  }
+
+  const castleRights = {a1:'Q', h1:'K', a8:'q', h8:'k'};
+  let rights = free.castling || '';
+  if (piece === 'K') rights = rights.replace(/[KQ]/g, '');
+  if (piece === 'k') rights = rights.replace(/[kq]/g, '');
+  if (castleRights[from]) rights = rights.replace(castleRights[from], '');
+  if (castleRights[capturedSquare] && captured) {
+    rights = rights.replace(castleRights[capturedSquare], '');
+  }
+  free.castling = rights;
+  free.ep = piece.toLowerCase() === 'p' &&
+    Math.abs(Number(from[1]) - Number(to[1])) === 2
+    ? from[0] + ((Number(from[1]) + Number(to[1])) / 2)
+    : null;
+
+  const notation = move.flag === 'castle'
+    ? (to[0] === 'g' ? 'O-O' : 'O-O-O')
+    : piece.toUpperCase() + from + (captured ? 'x' : '–') + to +
+      (move.promotion ? '=' + move.promotion.toUpperCase() : '');
   free.moves.push(notation);
   free.turn = color === 'w' ? 'b' : 'w';
 }
+
 function capturedPieces(room) {
   const captured = { w: [], b: [] };
   for (const move of room.game.history({ verbose: true })) {
@@ -226,7 +353,9 @@ function view(room) {
     captures: freeCaptureHistory(room),
     // Freedom moves are calculated client-side for highlighting and
     // individually validated on the server to avoid huge payloads.
-    legal: room.freedom ? [] : room.game.moves({ verbose: true }).map(move => ({ from: move.from, to: move.to, promotion: move.promotion || '' })),
+    legal: room.freedom
+      ? freePseudoMoves(room.freedom).map(move => ({ from: move.from, to: move.to, promotion: move.promotion }))
+      : room.game.moves({ verbose: true }).map(move => ({ from: move.from, to: move.to, promotion: move.promotion || '' })),
     chat: room.chat,
     rematch: { ...room.rematch },
     clock: clockView(room),
@@ -512,7 +641,9 @@ io.on('connection', socket => {
         board: freeBoardFromFen(room.game.fen()),
         turn: room.game.turn(),
         moves: room.game.history(),
-        captures: capturedPieces(room)
+        captures: capturedPieces(room),
+        castling: room.game.fen().split(' ')[2].replace('-', ''),
+        ep: room.game.fen().split(' ')[3] === '-' ? null : room.game.fen().split(' ')[3]
       };
       room.result = null; // Keep playing even after checkmate / time loss.
       room.rematch = { w: false, b: false };

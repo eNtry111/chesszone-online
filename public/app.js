@@ -361,11 +361,9 @@ function renderBoard() {
   if (!state) return;
   const pieces = pieceMap(state.fen), files = seat === 'b' ? 'hgfedcba' : 'abcdefgh';
   const ranks = seat === 'b' ? '12345678' : '87654321';
-  const targets = selected
-    ? state.freedom
-      ? allFreeTargets(pieces, selected)
-      : state.legal.filter(m => m.from === selected).map(m => m.to)
-    : [];
+  // Both modes get authoritative move targets from the server. Freedom
+  // mode ignores king safety only; every piece retains normal movement.
+  const targets = selected ? state.legal.filter(m => m.from === selected).map(m => m.to) : [];
   for (const rank of ranks) for (const file of files) {
     const sq = file + rank, p = pieces[sq], light = ('abcdefgh'.indexOf(file) + Number(rank)) % 2 === 0;
     const button = document.createElement('button');
@@ -384,32 +382,10 @@ function renderBoard() {
     button.addEventListener('click', () => clickSquare(sq, pieces)); board.append(button);
   }
 }
-function allFreeTargets(pieces, from) {
-  if (!from || pieces[from]?.color !== seat) return [];
-  const result = [];
-  for (const rank of '12345678') {
-    for (const file of 'abcdefgh') {
-      const square = file + rank;
-      if (square !== from && pieces[square]?.color !== seat) result.push(square);
-    }
-  }
-  return result;
-}
 function clickSquare(sq, pieces) {
   if (!isMyTurn()) return;
   if (pieces[sq]?.color === seat) { selected = selected === sq ? null : sq; return renderBoard(); }
   if (!selected) return;
-  if (state.freedom) {
-    if (!allFreeTargets(pieces, selected).includes(sq)) {
-      selected = null;
-      return renderBoard();
-    }
-    const moving = pieces[selected];
-    if (moving?.type === 'p' && sq[1] === (seat === 'w' ? '8' : '1')) {
-      return promote(selected, sq);
-    }
-    return sendMove(selected, sq, 'q');
-  }
   const possible = state.legal.filter(m => m.from === selected && m.to === sq);
   if (possible.length === 0) { selected = null; return renderBoard(); }
   if (possible.some(m => m.promotion)) return promote(selected, sq);
