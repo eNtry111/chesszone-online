@@ -74,7 +74,7 @@
           </form>
           <p id="room-nickname-invite-status" class="invite-feedback" role="status" aria-live="polite"></p>
         </div>
-        <div class="panel-section"><div class="tiny-label">ПАРТИЯ</div><div id="game-status" class="status">Ход белых</div><div id="moves" class="moves"><span class="muted">Пока ходов нет</span></div><div class="action-row"><button class="btn secondary hidden" id="ai-toggle">🤖 ИИ: выключен</button><button class="btn secondary" id="resign">Сдаться</button><button class="btn secondary hidden" id="rematch">Реванш</button></div></div>
+        <div class="panel-section"><div class="tiny-label">ПАРТИЯ</div><div id="game-status" class="status">Ход белых</div><div id="moves" class="moves"><span class="muted">Пока ходов нет</span></div><div class="action-row"><button class="btn secondary" id="resign">Сдаться</button><button class="btn secondary hidden" id="rematch">Реванш</button></div></div>
         <div class="panel-section chat-section"><div class="tiny-label">ЧАТ КОМНАТЫ</div><div id="chat-list" class="chat-list"><div class="muted">Напиши другу первое сообщение 🙂</div></div><form id="chat-form" class="chat-form"><input id="chat-text" maxlength="350" placeholder="Написать сообщение..." autocomplete="off" aria-label="Сообщение" /><button class="btn primary" aria-label="Отправить">➤</button></form></div>
       </aside>
     </section>
@@ -120,14 +120,9 @@
           <span>∞ Свобода хода</span>
           <input type="checkbox" id="freedom-toggle">
         </label>
-        <p class="settings-hint">Фигуры ходят по обычным правилам, но защищать короля от шаха необязательно. Король может зайти под удар или съесть фигуру, даже если его потом съедят. Партия продолжается после мата или взятия короля. Таймер и Stockfish отключаются.</p>
+        <p class="settings-hint">Фигуры ходят по обычным правилам, но защищать короля от шаха необязательно. Король может зайти под удар или съесть фигуру, даже если его потом съедят. Партия продолжается после мата или взятия короля. Таймер приостанавливается.</p>
         <p class="settings-hint"><strong>Важно:</strong> при выключении режима начинается новая обычная партия с начальной позиции.</p>
       </section>
-      <div id="owner-ai-level" class="ai-difficulty hidden">
-        <label class="setting-label" for="ai-level">Сложность Stockfish</label>
-        <select id="ai-level"><option value="2">Новичок</option><option value="8" selected>Средний</option><option value="18">Сильный</option></select>
-        <p class="settings-hint">Изменять уровень ИИ может только создатель комнаты.</p>
-      </div>
       <p class="settings-hint">Время на ход выбирается при создании комнаты. Если соперник отключился, часы останавливаются.</p>
       <div class="sound-test-actions">
         <button class="btn primary" type="button" id="test-sound">▶ Звук хода</button>

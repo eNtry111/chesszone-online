@@ -51,7 +51,6 @@
 .settings-row input { width: 19px; height: 19px; accent-color: #b75c8b; }
 .setting-label { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; margin-bottom: 9px; }
 #sound-volume { display: block; width: 100%; accent-color: #be6795; margin: 0 0 22px; }
-.ai-difficulty { margin-bottom: 16px; border-top: 1px solid var(--line); padding-top: 17px; }
 .settings-hint { font-size: 12px; margin: 10px 0 18px; }
 @media (max-width: 480px) {
   .player-strip { gap: 7px; }

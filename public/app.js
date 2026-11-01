@@ -7,7 +7,6 @@ let isRoomOwner = false;
 let selected = null;
 let pendingPromotion = null;
 let roomCode = null;
-let aiEnabled = false;
 let activeIncomingInvite = null;
 let clockOffset = 0;
 const soundPrefs = {
@@ -131,11 +130,7 @@ function updateMySeat({ color, owner }) {
   pendingPromotion = null;
   $('#promotion').classList.add('hidden');
 
-  // Owner-only AI controls stay with the creator after colour swaps.
-  $('#ai-toggle').classList.toggle('hidden', !isRoomOwner);
-  $('#owner-ai-level').classList.toggle('hidden', !isRoomOwner);
   $('#freedom-settings').classList.toggle('hidden', !isRoomOwner);
-  if (!isRoomOwner) aiEnabled = false;
 
   const other = color === 'w' ? 'b' : 'w';
   $('#my-color').textContent = color === 'w' ? 'Белые' : 'Чёрные';
@@ -273,14 +268,6 @@ socket.on('seat-updated', next => {
   toast('Новая партия №' + next.round + ': теперь ты играешь ' +
     (next.color === 'w' ? 'белыми' : 'чёрными') + '.');
 });
-socket.on('ai-state', ({ enabled, level }) => {
-  if (!isRoomOwner) return;
-  aiEnabled = !!enabled;
-  $('#ai-toggle').textContent = aiEnabled ? '🤖 Stockfish: включён' : '🤖 Stockfish: выключен';
-  if ([2, 8, 18].includes(Number(level))) $('#ai-level').value = String(level);
-  renderBoard();
-});
-socket.on('ai-error', ({ message }) => toast(message));
 socket.on('game-state', next => {
   const previous = state;
   if (next.clock) clockOffset = next.clock.serverTime - Date.now();
@@ -354,7 +341,7 @@ function renderCapturedPieces() {
 }
 
 function isMyTurn() {
-  return state && state.turn === seat && state.players.w && state.players.b && !state.status.over && !aiEnabled && socket.connected;
+  return state && state.turn === seat && state.players.w && state.players.b && !state.status.over && socket.connected;
 }
 function renderBoard() {
   const board = $('#board'); board.replaceChildren();
@@ -415,7 +402,6 @@ function render() {
   $('#game-status').textContent = state.players.b ? state.status.text : 'Ожидаем второго игрока';
   $('#freedom-banner').classList.toggle('hidden', !state.freedom);
   $('#freedom-toggle').checked = !!state.freedom;
-  $('#ai-toggle').disabled = !!state.freedom;
   $('#match-number').textContent = 'Партия №' + (state.round || 1);
   $('#turn-banner').textContent = !state.players.b
     ? 'Ожидание второго игрока'
@@ -461,15 +447,6 @@ $('#resign').addEventListener('click', () => {
 $('#rematch').addEventListener('click', () => {
   socket.emit('rematch', {}, response => { if(response?.error) toast(response.error); });
 });
-
-// Кнопка существует на странице, но показывается только создателю комнаты.
-$('#ai-toggle').addEventListener('click', () => {
-  if (!isRoomOwner) return;
-  socket.emit('toggle-ai', {}, response => {
-    if (response?.error) toast(response.error);
-  });
-});
-
 
 // Server-authoritative clock: client only displays a synchronized countdown.
 function displayTime(ms) {
@@ -536,20 +513,12 @@ $('#freedom-toggle').addEventListener('change', event => {
     }
   });
 });
-$('#ai-level').addEventListener('change', event => {
-  if (!isRoomOwner) return;
-  socket.emit('set-ai-level', { level: Number(event.target.value) }, response => {
-    if (response?.error) toast(response.error);
-  });
-});
-
 function showLobby() {
   roomCode = null;
   inviteCode = null;
   seat = null;
   isRoomOwner = false;
   state = null;
-  aiEnabled = false;
   selected = null;
   history.replaceState(null, '', location.pathname);
   $('#room-input').value = '';
