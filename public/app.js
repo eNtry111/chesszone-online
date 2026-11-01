@@ -214,25 +214,36 @@ const pieceNames = {
   r: 'ладья', q: 'ферзь'
 };
 function renderCapturedPieces() {
-  if (!state) return;
-  for (const [color, listSelector, countSelector] of [
-    ['w', '#captured-white', '#captured-white-count'],
-    ['b', '#captured-black', '#captured-black-count']
+  if (!state || !seat) return;
+
+  // Верхняя строка показывает фигуры, взятые соперником.
+  // Нижняя — фигуры, которые забрал игрок внизу экрана.
+  // Для гостя за чёрных всё правильно меняется местами.
+  const opponentColor = seat === 'w' ? 'b' : 'w';
+  for (const [position, capturer, victim] of [
+    ['top', opponentColor, seat],
+    ['bottom', seat, opponentColor]
   ]) {
-    const list = $(listSelector);
-    const taken = state.captures?.[color] || [];
-    list.replaceChildren();
-    for (const type of taken) {
-      const icon = document.createElement('span');
-      icon.className = `captured-piece ${color === 'w' ? 'captured-light' : 'captured-dark'}`;
-      icon.textContent = glyph[color + type] || '♟';
-      icon.title = `${color === 'w' ? 'Белая' : 'Чёрная'} фигура: ${pieceNames[type] || type}`;
-      icon.setAttribute('aria-label', icon.title);
-      list.append(icon);
+    const container = $(`#captured-${position}`);
+    const captured = state.captures?.[victim] || [];
+    container.replaceChildren();
+
+    for (const type of captured) {
+      const piece = document.createElement('span');
+      piece.className = `captured-piece ${victim === 'w' ? 'captured-light' : 'captured-dark'}`;
+      piece.textContent = glyph[victim + type] || '';
+      piece.title = `${victim === 'w' ? 'Белая' : 'Чёрная'} фигура: ${pieceNames[type] || type}`;
+      piece.setAttribute('aria-label', piece.title);
+      container.append(piece);
     }
-    const count = $(countSelector);
-    count.textContent = String(taken.length);
-    count.title = 'Всего съедено фигур: ' + taken.length;
+
+    const capturerName = capturer === 'w' ? 'Белые' : 'Чёрные';
+    $(`#captured-${position}-title`).textContent = `${capturerName} взяли`;
+    $(`#captured-${position}-count`).textContent = String(captured.length);
+    $(`#captured-${position}-row`).setAttribute(
+      'aria-label',
+      `${capturerName} взяли ${captured.length} фигур соперника`
+    );
   }
 }
 
