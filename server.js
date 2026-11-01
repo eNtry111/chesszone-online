@@ -118,13 +118,45 @@ function isOwner(room, socket) {
   const color = room && getPlayer(room, socket);
   return !!color && room.players[color]?.token === room.ownerToken;
 }
+// Custom result: a lone king loses against a king plus other pieces.
+function kingOnlyResult(room) {
+  const counts = {w:{king:0,other:0},b:{king:0,other:0}};
+  if (room.freedom) {
+    for (const piece of Object.values(room.freedom.board)) {
+      const color = piece === piece.toUpperCase() ? 'w' : 'b';
+      if (piece.toLowerCase() === 'k') counts[color].king++;
+      else counts[color].other++;
+    }
+  } else {
+    for (const row of room.game.board()) {
+      for (const piece of row) {
+        if (!piece) continue;
+        if (piece.type === 'k') counts[piece.color].king++;
+        else counts[piece.color].other++;
+      }
+    }
+  }
+  if (counts.w.king !== 1 || counts.b.king !== 1) return null;
+  if (counts.w.other === 0 && counts.b.other === 0) {
+    return {over:true,text:'Ничья — на доске остались только короли.',cause:'bare_kings'};
+  }
+  if (counts.w.other === 0 && counts.b.other > 0) {
+    return {over:true,text:'Белые остались только с королём. Победили чёрные!',cause:'lone_king'};
+  }
+  if (counts.b.other === 0 && counts.w.other > 0) {
+    return {over:true,text:'Чёрные остались только с королём. Победили белые!',cause:'lone_king'};
+  }
+  return null;
+}
 function gameStatus(room) {
+  if (room.result) return room.result;
+  const loneKing = kingOnlyResult(room);
+  if (loneKing) return loneKing;
   if (room.freedom) return {
     over: false,
     text: '∞ Свобода хода — ход ' + (room.freedom.turn === 'w' ? 'белых' : 'чёрных'),
     cause: 'freedom'
   };
-  if (room.result) return room.result;
   const game = room.game;
   if (game.isCheckmate()) return { over: true, text: `Мат! Победили ${game.turn() === 'w' ? 'чёрные' : 'белые'}.`, cause: 'checkmate' };
   if (game.isStalemate()) return { over: true, text: 'Ничья — пат.', cause: 'draw' };
