@@ -7,6 +7,69 @@ let selected = null;
 let pendingPromotion = null;
 let roomCode = null;
 let aiEnabled = false;
+let clockOffset = 0;
+const soundPrefs = {
+  enabled: localStorage.getItem('chesszone:sound') !== 'off',
+  volume: Math.min(100, Math.max(0, Number(localStorage.getItem('chesszone:volume') ?? 35)))
+};
+let audioContext = null;
+
+function audio() {
+  if (!soundPrefs.enabled) return null;
+  try {
+    audioContext = audioContext || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
+    return audioContext;
+  } catch { return null; }
+}
+
+// Gentle piece-drag sound made from filtered noise, not an external sound file.
+function playMoveSound() {
+  const ctx = audio();
+  if (!ctx || soundPrefs.volume === 0) return;
+  const length = Math.floor(ctx.sampleRate * 0.14);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    const t = i / length;
+    channel[i] = (Math.random() * 2 - 1) * (1 - t) * (0.7 + 0.3 * Math.sin(t * 24));
+  }
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass'; filter.frequency.value = 1500;
+  const gain = ctx.createGain();
+  const now = ctx.currentTime;
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.07 * soundPrefs.volume / 100, now + 0.018);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
+  source.connect(filter).connect(gain).connect(ctx.destination);
+  source.start(now); source.stop(now + 0.15);
+}
+
+// Quiet two-note falling tone to signal resignation.
+function playResignSound() {
+  const ctx = audio();
+  if (!ctx || soundPrefs.volume === 0) return;
+  const now = ctx.currentTime;
+  [330, 247].forEach((frequency, i) => {
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(frequency, now + i * 0.12);
+    oscillator.frequency.exponentialRampToValueAtTime(frequency * .82, now + i * 0.12 + .24);
+    gain.gain.setValueAtTime(.0001, now + i * .12);
+    gain.gain.exponentialRampToValueAtTime(.075 * soundPrefs.volume / 100, now + i * .12 + .025);
+    gain.gain.exponentialRampToValueAtTime(.0001, now + i * .12 + .27);
+    oscillator.connect(gain).connect(ctx.destination);
+    oscillator.start(now + i * .12);
+    oscillator.stop(now + i * .12 + .28);
+  });
+}
+
+// Browsers only allow audio after a user action.
+document.addEventListener('pointerdown', () => audio(), { once: true });
+
 const glyph = { wk: '♔', wq: '♕', wr: '♖', wb: '♗', wn: '♘', wp: '♙', bk: '♚', bq: '♛', br: '♜', bb: '♝', bn: '♞', bp: '\u265F\uFE0E' };
 const names = { q: 'Ферзь', r: 'Ладья', b: 'Слон', n: 'Конь' };
 
@@ -18,8 +81,10 @@ function savedToken(code) { return localStorage.getItem(`chesszone:${code}`) || 
 function enterRoom({ code, color, token }) {
   roomCode = code; seat = color; selected = null;
   $('#ai-toggle').classList.toggle('hidden', color !== 'w');
+  $('#owner-ai-level').classList.toggle('hidden', color !== 'w');
   if (color !== 'w') aiEnabled = false;
   localStorage.setItem(`chesszone:${code}`, token);
+  $('#settings-overlay').classList.add('hidden');
   history.replaceState(null, '', `?room=${encodeURIComponent(code)}`);
   $('#lobby').classList.add('hidden'); $('#game').classList.remove('hidden');
   $('#room-code').textContent = code;
@@ -38,32 +103,42 @@ function submitJoin(code) {
 function createRoom() {
   const name = $('#name').value.trim() || 'Игрок';
   localStorage.setItem('chesszone:name', name);
-  socket.emit('create-room', { name }, response => { if (response?.error) toast(response.error); });
+  socket.emit('create-room', { name, moveTimeMs: Number($('#move-time').value) }, response => { if (response?.error) toast(response.error); });
 }
 $('#create').addEventListener('click', createRoom);
 $('#join').addEventListener('click', () => submitJoin($('#room-input').value));
 $('#room-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitJoin(e.target.value); });
 $('#name').value = localStorage.getItem('chesszone:name') || '';
-const prefill = new URLSearchParams(location.search).get('room');
-if (prefill && /^[A-Fa-f0-9]{10}$/.test(prefill)) $('#room-input').value = prefill.toUpperCase();
+let inviteCode = new URLSearchParams(location.search).get('room');
+if (inviteCode && /^[A-Fa-f0-9]{10}$/.test(inviteCode)) $('#room-input').value = inviteCode.toUpperCase();
 
 socket.on('connect', () => {
   $('#connection').textContent = 'На связи'; $('#connection').classList.add('online');
   if (roomCode) submitJoin(roomCode);
-  else if (prefill && savedToken(prefill.toUpperCase())) submitJoin(prefill);
+  else if (inviteCode && savedToken(inviteCode.toUpperCase())) submitJoin(inviteCode);
 });
 socket.on('disconnect', () => {
   $('#connection').textContent = 'Соединение потеряно'; $('#connection').classList.remove('online');
 });
 socket.on('session-replaced', () => toast('Эта партия открылась в другой вкладке.'));
 socket.on('joined', enterRoom);
-socket.on('ai-state', ({ enabled }) => {
+socket.on('ai-state', ({ enabled, level }) => {
   if (seat !== 'w') return;
   aiEnabled = !!enabled;
-  $('#ai-toggle').textContent = aiEnabled ? '🤖 ИИ: включён' : '🤖 ИИ: выключен';
+  $('#ai-toggle').textContent = aiEnabled ? '🤖 Stockfish: включён' : '🤖 Stockfish: выключен';
+  if ([2, 8, 18].includes(Number(level))) $('#ai-level').value = String(level);
   renderBoard();
 });
-socket.on('game-state', next => { state = next; selected = null; render(); });
+socket.on('ai-error', ({ message }) => toast(message));
+socket.on('game-state', next => {
+  const previous = state;
+  if (next.clock) clockOffset = next.clock.serverTime - Date.now();
+  state = next;
+  selected = null;
+  if (previous && next.moves.length > previous.moves.length) playMoveSound();
+  if (previous && !previous.status.over && next.status.over && next.status.cause === 'resign') playResignSound();
+  render();
+});
 
 function pieceMap(fen) {
   const map = {};
@@ -82,7 +157,7 @@ function pieceMap(fen) {
   return map;
 }
 function isMyTurn() {
-  return state && state.turn === seat && state.players.w && state.players.b && !state.status.over && !aiEnabled;
+  return state && state.turn === seat && state.players.w && state.players.b && !state.status.over && !aiEnabled && socket.connected;
 }
 function renderBoard() {
   const board = $('#board'); board.replaceChildren();
@@ -139,6 +214,13 @@ function render() {
   $('#opponent-online').textContent = !state.players[them] ? 'Друг ещё не зашёл' : state.players[them].online ? 'В сети' : 'Не в сети';
   $('#my-online').textContent = state.players[seat]?.online ? 'В сети' : 'Переподключение';
   $('#game-status').textContent = state.players.b ? state.status.text : 'Ожидаем второго игрока';
+  $('#turn-banner').textContent = !state.players.b
+    ? 'Ожидание второго игрока'
+    : state.status.over ? state.status.text
+      : state.clock?.paused ? 'Пауза — ожидаем подключения игрока'
+        : (state.turn === seat ? '● Твой ход' : '● Ход соперника') + ' · ' + (state.turn === 'w' ? 'ходят белые' : 'ходят чёрные');
+  $('#turn-banner').classList.toggle('your-turn', !state.status.over && !!state.players.b && !state.clock?.paused && state.turn === seat);
+  updateClocks();
   const moves = $('#moves'); moves.replaceChildren();
   if (!state.moves.length) { const el = document.createElement('span'); el.className='muted'; el.textContent='Пока ходов нет'; moves.append(el); }
   else for (let i=0;i<state.moves.length;i+=2) {
@@ -174,10 +256,88 @@ $('#rematch').addEventListener('click', () => {
   socket.emit('rematch', {}, response => { if(response?.error) toast(response.error); });
 });
 
-// Кнопку видит только создатель. Сервер тоже проверяет права.
+// Кнопка существует на странице, но показывается только создателю комнаты.
 $('#ai-toggle').addEventListener('click', () => {
   if (seat !== 'w') return;
   socket.emit('toggle-ai', {}, response => {
     if (response?.error) toast(response.error);
+  });
+});
+
+
+// Server-authoritative clock: client only displays a synchronized countdown.
+function displayTime(ms) {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+function updateClocks() {
+  if (!state?.clock || !seat) return;
+  const them = seat === 'w' ? 'b' : 'w';
+  const clock = state.clock;
+  const running = !state.status.over && !clock.paused && !!state.players.b;
+  const remaining = running && clock.deadline !== null
+    ? Math.max(0, clock.deadline - (Date.now() + clockOffset))
+    : clock.remainingMs;
+  for (const [color, selector] of [[seat, '#my-timer'], [them, '#opponent-timer']]) {
+    const el = $(selector);
+    const isActive = color === clock.active;
+    el.textContent = displayTime(isActive ? remaining : clock.perMoveMs);
+    el.classList.toggle('active', isActive && running);
+    el.classList.toggle('critical', isActive && running && remaining <= 10000);
+    el.classList.toggle('paused', clock.paused && isActive);
+  }
+}
+setInterval(updateClocks, 200);
+
+// UI-only sound settings. Settings do not change the opponent's preferences.
+$('#sound-toggle').checked = soundPrefs.enabled;
+$('#sound-volume').value = String(soundPrefs.volume);
+$('#volume-label').textContent = `${soundPrefs.volume}%`;
+$('#sound-toggle').addEventListener('change', event => {
+  soundPrefs.enabled = event.target.checked;
+  localStorage.setItem('chesszone:sound', soundPrefs.enabled ? 'on' : 'off');
+  if (soundPrefs.enabled) audio();
+});
+$('#sound-volume').addEventListener('input', event => {
+  soundPrefs.volume = Number(event.target.value);
+  $('#volume-label').textContent = `${soundPrefs.volume}%`;
+  localStorage.setItem('chesszone:volume', String(soundPrefs.volume));
+});
+$('#test-sound').addEventListener('click', playMoveSound);
+$('#open-settings').addEventListener('click', () => $('#settings-overlay').classList.remove('hidden'));
+$('#close-settings').addEventListener('click', () => $('#settings-overlay').classList.add('hidden'));
+$('#settings-overlay').addEventListener('click', event => {
+  if (event.target.id === 'settings-overlay') $('#settings-overlay').classList.add('hidden');
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') $('#settings-overlay').classList.add('hidden');
+});
+$('#ai-level').addEventListener('change', event => {
+  if (seat !== 'w') return;
+  socket.emit('set-ai-level', { level: Number(event.target.value) }, response => {
+    if (response?.error) toast(response.error);
+  });
+});
+
+function showLobby() {
+  roomCode = null;
+  inviteCode = null;
+  seat = null;
+  state = null;
+  aiEnabled = false;
+  selected = null;
+  history.replaceState(null, '', location.pathname);
+  $('#room-input').value = '';
+  $('#game').classList.add('hidden');
+  $('#lobby').classList.remove('hidden');
+  $('#settings-overlay').classList.add('hidden');
+  $('#promotion').classList.add('hidden');
+}
+socket.on('left-room', showLobby);
+$('#leave-to-menu').addEventListener('click', () => {
+  if (!confirm('Выйти в главное меню? При необходимости ты сможешь вернуться по коду комнаты.')) return;
+  socket.emit('leave-room', {}, response => {
+    if (response?.error) toast(response.error);
+    else showLobby();
   });
 });

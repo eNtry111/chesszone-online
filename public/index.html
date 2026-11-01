@@ -22,17 +22,23 @@
     <section id="lobby" class="lobby card">
       <div class="lobby-top"><div class="illustration">♙ ♘ ♕</div><div><h2>Начнём партию?</h2><p>Ты играешь белыми, твой друг — чёрными.</p></div></div>
       <div class="field"><label for="name">Твоё имя</label><input id="name" maxlength="24" placeholder="Например, Alex" autocomplete="nickname" /></div>
+      <div class="field time-select-field"><label for="move-time">Время на каждый ход</label><select id="move-time"><option value="30000">30 секунд</option><option value="60000" selected>1 минута</option><option value="120000">2 минуты</option></select></div>
       <div class="lobby-actions"><button class="btn primary" id="create">＋ Создать комнату</button><span class="or">или</span><input id="room-input" aria-label="Код комнаты" maxlength="10" placeholder="Код комнаты" /><button class="btn secondary" id="join">Присоединиться</button></div>
       <p class="note">Друг должен открыть этот же сайт по твоей ссылке. Локальный адрес localhost работает только на твоём компьютере.</p>
     </section>
 
     <section id="game" class="game hidden">
       <div class="board-column">
-        <div class="player-strip"><span class="avatar black">♚</span><div><strong id="opponent-name">Соперник</strong><small id="opponent-online">Ожидание подключения</small></div><span class="side-pill" id="opponent-color">Чёрные</span></div>
+        <div class="player-strip"><span class="avatar black">♚</span><div><strong id="opponent-name">Соперник</strong><small id="opponent-online">Ожидание подключения</small></div><span class="timer" id="opponent-timer" aria-label="Время соперника">1:00</span><span class="side-pill" id="opponent-color">Чёрные</span></div>
+        <div id="turn-banner" class="turn-banner" role="status">Ожидание второго игрока</div>
         <div id="board" class="board" aria-label="Шахматная доска"></div>
-        <div class="player-strip"><span class="avatar white">♔</span><div><strong id="my-name">Ты</strong><small id="my-online">Подключено</small></div><span class="side-pill" id="my-color">Белые</span></div>
+        <div class="player-strip"><span class="avatar white">♔</span><div><strong id="my-name">Ты</strong><small id="my-online">Подключено</small></div><span class="timer" id="my-timer" aria-label="Твоё время">1:00</span><span class="side-pill" id="my-color">Белые</span></div>
       </div>
       <aside class="panel">
+        <div class="panel-toolbar">
+          <button class="tool-btn" id="leave-to-menu" type="button" title="Главное меню">← Главное меню</button>
+          <button class="tool-btn" id="open-settings" type="button" title="Настройки звука и игры">⚙ Настройки</button>
+        </div>
         <div class="panel-section room-section"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Отправь эту ссылку другу — он зайдёт в твою партию.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button></div>
         <div class="panel-section"><div class="tiny-label">ПАРТИЯ</div><div id="game-status" class="status">Ход белых</div><div id="moves" class="moves"><span class="muted">Пока ходов нет</span></div><div class="action-row"><button class="btn secondary hidden" id="ai-toggle">🤖 ИИ: выключен</button><button class="btn secondary" id="resign">Сдаться</button><button class="btn secondary hidden" id="rematch">Реванш</button></div></div>
         <div class="panel-section chat-section"><div class="tiny-label">ЧАТ КОМНАТЫ</div><div id="chat-list" class="chat-list"><div class="muted">Напиши другу первое сообщение 🙂</div></div><form id="chat-form" class="chat-form"><input id="chat-text" maxlength="350" placeholder="Написать сообщение..." autocomplete="off" aria-label="Сообщение" /><button class="btn primary" aria-label="Отправить">➤</button></form></div>
@@ -40,6 +46,21 @@
     </section>
   </main>
   <div id="promotion" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Превращение пешки"><div class="promotion-box"><h3>В кого превратить пешку?</h3><div id="promotion-options" class="promotion-options"></div><button id="cancel-promotion" class="btn secondary">Отмена</button></div></div>
+  <div id="settings-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Настройки игры">
+    <div class="settings-box">
+      <div class="settings-title"><h2>⚙ Настройки</h2><button type="button" class="settings-close" id="close-settings" aria-label="Закрыть настройки">×</button></div>
+      <label class="settings-row" for="sound-toggle"><span>Звуки игры</span><input type="checkbox" id="sound-toggle" checked></label>
+      <label class="setting-label" for="sound-volume">Громкость звуков <span id="volume-label">35%</span></label>
+      <input type="range" id="sound-volume" min="0" max="100" step="5" value="35">
+      <div id="owner-ai-level" class="ai-difficulty hidden">
+        <label class="setting-label" for="ai-level">Сложность Stockfish</label>
+        <select id="ai-level"><option value="2">Новичок</option><option value="8" selected>Средний</option><option value="18">Сильный</option></select>
+        <p class="settings-hint">Изменять уровень ИИ может только создатель комнаты.</p>
+      </div>
+      <p class="settings-hint">Время на ход выбирается при создании комнаты. Если соперник отключился, часы останавливаются.</p>
+      <button class="btn primary full" type="button" id="test-sound">▶ Проверить звук хода</button>
+    </div>
+  </div>
   <div id="toast" class="toast hidden" role="status"></div>
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
