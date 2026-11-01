@@ -469,11 +469,17 @@ const defaultTheme = Object.freeze({
 });
 const themes = {
   pink: defaultTheme,
+  monochrome: { light:'#ffffff', dark:'#292929', background:'#f2f2f2', accent:'#252525' },
+  graphite: { light:'#c4c8cd', dark:'#59616a', background:'#e5e8ec', accent:'#414c58' },
   classic: { light:'#eeeed2', dark:'#769656', background:'#f0f4e8', accent:'#568441' },
   ocean: { light:'#e5eff9', dark:'#7b9dc3', background:'#edf4fc', accent:'#426fa8' },
   night: { light:'#b3b6c7', dark:'#555c7b', background:'#22263a', accent:'#7777bf' },
   peach: { light:'#ffe8d1', dark:'#d99375', background:'#fff1e5', accent:'#c47351' },
-  violet: { light:'#eee6ff', dark:'#a28bce', background:'#f6f0ff', accent:'#8358b6' }
+  violet: { light:'#eee6ff', dark:'#a28bce', background:'#f6f0ff', accent:'#8358b6' },
+  forest: { light:'#d2e4cf', dark:'#48785c', background:'#e7f0e6', accent:'#317050' },
+  sunset: { light:'#fff0c9', dark:'#d17f77', background:'#fff1e8', accent:'#c85c69' },
+  ice: { light:'#f2fcff', dark:'#79b7cc', background:'#e9f7fb', accent:'#287e9b' },
+  neon: { light:'#e5e1f5', dark:'#8551b5', background:'#f3eefb', accent:'#7b38ad' }
 };
 const colorControls = {
   light: '#theme-light',
@@ -503,6 +509,14 @@ function setTheme(next) {
   for (const [key, selector] of Object.entries(colorControls)) {
     $(selector).value = currentTheme[key];
   }
+  // Highlight the chosen preset; manual adjustments create a custom theme.
+  document.querySelectorAll('[data-theme]').forEach(button => {
+    const preset = themes[button.dataset.theme];
+    const active = preset && Object.keys(defaultTheme).every(key =>
+      preset[key].toLowerCase() === currentTheme[key].toLowerCase());
+    button.classList.toggle('selected', !!active);
+    button.setAttribute('aria-pressed', String(!!active));
+  });
   localStorage.setItem('chesszone:theme', JSON.stringify(currentTheme));
 }
 setTheme(currentTheme);
