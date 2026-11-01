@@ -30,19 +30,17 @@
     <section id="game" class="game hidden">
       <div class="board-column">
         <div class="player-strip"><span class="avatar black">♚</span><div><strong id="opponent-name">Соперник</strong><small id="opponent-online">Ожидание подключения</small></div><span class="timer" id="opponent-timer" aria-label="Время соперника">1:00</span><span class="side-pill" id="opponent-color">Чёрные</span></div>
+        <div id="captured-top-row" class="capture-row capture-row-top" aria-label="Фигуры, взятые верхним игроком">
+          <span class="capture-heading" id="captured-top-title">Чёрные взяли</span>
+          <div id="captured-top" class="captured-pieces" aria-live="polite"></div>
+          <span id="captured-top-count" class="capture-count">0</span>
+        </div>
         <div id="turn-banner" class="turn-banner" role="status">Ожидание второго игрока</div>
-        <div class="board-stage">
-          <aside class="capture-tray capture-tray-white" aria-label="Съеденные белые фигуры">
-            <div class="capture-heading">Белые</div>
-            <div id="captured-white" class="captured-pieces" aria-live="polite"></div>
-            <div id="captured-white-count" class="capture-count">0</div>
-          </aside>
-          <div id="board" class="board" aria-label="Шахматная доска"></div>
-          <aside class="capture-tray capture-tray-black" aria-label="Съеденные чёрные фигуры">
-            <div class="capture-heading">Чёрные</div>
-            <div id="captured-black" class="captured-pieces" aria-live="polite"></div>
-            <div id="captured-black-count" class="capture-count">0</div>
-          </aside>
+        <div id="board" class="board" aria-label="Шахматная доска"></div>
+        <div id="captured-bottom-row" class="capture-row capture-row-bottom" aria-label="Фигуры, взятые нижним игроком">
+          <span class="capture-heading" id="captured-bottom-title">Белые взяли</span>
+          <div id="captured-bottom" class="captured-pieces" aria-live="polite"></div>
+          <span id="captured-bottom-count" class="capture-count">0</span>
         </div>
         <div class="player-strip"><span class="avatar white">♔</span><div><strong id="my-name">Ты</strong><small id="my-online">Подключено</small></div><span class="timer" id="my-timer" aria-label="Твоё время">1:00</span><span class="side-pill" id="my-color">Белые</span></div>
       </div>
