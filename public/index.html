@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f5e6ed" />
+  <title>ChessZone — шахматы с другом</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="brand"><span class="brand-mark">♞</span><span>Chess<span class="pink">Zone</span></span></div>
+    <div class="header-right"><span id="connection" class="connection">Подключение…</span><span class="badge">Онлайн • 2 игрока</span></div>
+  </header>
+  <main class="container">
+    <section class="intro">
+      <div class="eyebrow">ИГРАЙТЕ ВМЕСТЕ</div>
+      <h1>Шахматы, где вы <em>встречаетесь</em>.</h1>
+      <p>Создай комнату, пригласи друга и играй прямо в браузере. Без регистрации и сложных настроек.</p>
+    </section>
+
+    <section id="lobby" class="lobby card">
+      <div class="lobby-top"><div class="illustration">♙ ♘ ♕</div><div><h2>Начнём партию?</h2><p>Ты играешь белыми, твой друг — чёрными.</p></div></div>
+      <div class="field"><label for="name">Твоё имя</label><input id="name" maxlength="24" placeholder="Например, Alex" autocomplete="nickname" /></div>
+      <div class="lobby-actions"><button class="btn primary" id="create">＋ Создать комнату</button><span class="or">или</span><input id="room-input" aria-label="Код комнаты" maxlength="10" placeholder="Код комнаты" /><button class="btn secondary" id="join">Присоединиться</button></div>
+      <p class="note">Друг должен открыть этот же сайт по твоей ссылке. Локальный адрес localhost работает только на твоём компьютере.</p>
+    </section>
+
+    <section id="game" class="game hidden">
+      <div class="board-column">
+        <div class="player-strip"><span class="avatar black">♚</span><div><strong id="opponent-name">Соперник</strong><small id="opponent-online">Ожидание подключения</small></div><span class="side-pill" id="opponent-color">Чёрные</span></div>
+        <div id="board" class="board" aria-label="Шахматная доска"></div>
+        <div class="player-strip"><span class="avatar white">♔</span><div><strong id="my-name">Ты</strong><small id="my-online">Подключено</small></div><span class="side-pill" id="my-color">Белые</span></div>
+      </div>
+      <aside class="panel">
+        <div class="panel-section room-section"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Отправь эту ссылку другу — он зайдёт в твою партию.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button></div>
+        <div class="panel-section"><div class="tiny-label">ПАРТИЯ</div><div id="game-status" class="status">Ход белых</div><div id="moves" class="moves"><span class="muted">Пока ходов нет</span></div><div class="action-row"><button class="btn secondary hidden" id="ai-toggle">🤖 ИИ: выключен</button><button class="btn secondary" id="resign">Сдаться</button><button class="btn secondary hidden" id="rematch">Реванш</button></div></div>
+        <div class="panel-section chat-section"><div class="tiny-label">ЧАТ КОМНАТЫ</div><div id="chat-list" class="chat-list"><div class="muted">Напиши другу первое сообщение 🙂</div></div><form id="chat-form" class="chat-form"><input id="chat-text" maxlength="350" placeholder="Написать сообщение..." autocomplete="off" aria-label="Сообщение" /><button class="btn primary" aria-label="Отправить">➤</button></form></div>
+      </aside>
+    </section>
+  </main>
+  <div id="promotion" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Превращение пешки"><div class="promotion-box"><h3>В кого превратить пешку?</h3><div id="promotion-options" class="promotion-options"></div><button id="cancel-promotion" class="btn secondary">Отмена</button></div></div>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
