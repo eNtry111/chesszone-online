@@ -134,6 +134,7 @@ function updateMySeat({ color, owner }) {
   // Owner-only AI controls stay with the creator after colour swaps.
   $('#ai-toggle').classList.toggle('hidden', !isRoomOwner);
   $('#owner-ai-level').classList.toggle('hidden', !isRoomOwner);
+  $('#freedom-settings').classList.toggle('hidden', !isRoomOwner);
   if (!isRoomOwner) aiEnabled = false;
 
   const other = color === 'w' ? 'b' : 'w';
@@ -251,7 +252,7 @@ $('#accept-nickname-invite').addEventListener('click', () => replyToInvite(true)
 $('#decline-nickname-invite').addEventListener('click', () => replyToInvite(false));
 
 let inviteCode = new URLSearchParams(location.search).get('room');
-if (inviteCode && /^[A-Fa-f0-9]{10}$/.test(inviteCode)) $('#room-input').value = inviteCode.toUpperCase();
+if (inviteCode && /^[A-HJ-NP-Z2-9]{6}$/i.test(inviteCode)) $('#room-input').value = inviteCode.toUpperCase();
 
 socket.on('connect', () => {
   $('#connection').textContent = 'На связи'; $('#connection').classList.add('online');
@@ -360,7 +361,11 @@ function renderBoard() {
   if (!state) return;
   const pieces = pieceMap(state.fen), files = seat === 'b' ? 'hgfedcba' : 'abcdefgh';
   const ranks = seat === 'b' ? '12345678' : '87654321';
-  const targets = selected ? state.legal.filter(m => m.from === selected).map(m => m.to) : [];
+  const targets = selected
+    ? state.freedom
+      ? allFreeTargets(pieces, selected)
+      : state.legal.filter(m => m.from === selected).map(m => m.to)
+    : [];
   for (const rank of ranks) for (const file of files) {
     const sq = file + rank, p = pieces[sq], light = ('abcdefgh'.indexOf(file) + Number(rank)) % 2 === 0;
     const button = document.createElement('button');
@@ -379,10 +384,32 @@ function renderBoard() {
     button.addEventListener('click', () => clickSquare(sq, pieces)); board.append(button);
   }
 }
+function allFreeTargets(pieces, from) {
+  if (!from || pieces[from]?.color !== seat) return [];
+  const result = [];
+  for (const rank of '12345678') {
+    for (const file of 'abcdefgh') {
+      const square = file + rank;
+      if (square !== from && pieces[square]?.color !== seat) result.push(square);
+    }
+  }
+  return result;
+}
 function clickSquare(sq, pieces) {
   if (!isMyTurn()) return;
   if (pieces[sq]?.color === seat) { selected = selected === sq ? null : sq; return renderBoard(); }
   if (!selected) return;
+  if (state.freedom) {
+    if (!allFreeTargets(pieces, selected).includes(sq)) {
+      selected = null;
+      return renderBoard();
+    }
+    const moving = pieces[selected];
+    if (moving?.type === 'p' && sq[1] === (seat === 'w' ? '8' : '1')) {
+      return promote(selected, sq);
+    }
+    return sendMove(selected, sq, 'q');
+  }
   const possible = state.legal.filter(m => m.from === selected && m.to === sq);
   if (possible.length === 0) { selected = null; return renderBoard(); }
   if (possible.some(m => m.promotion)) return promote(selected, sq);
@@ -410,13 +437,18 @@ function render() {
   $('#opponent-online').textContent = !state.players[them] ? 'Друг ещё не зашёл' : state.players[them].online ? 'В сети' : 'Не в сети';
   $('#my-online').textContent = state.players[seat]?.online ? 'В сети' : 'Переподключение';
   $('#game-status').textContent = state.players.b ? state.status.text : 'Ожидаем второго игрока';
+  $('#freedom-banner').classList.toggle('hidden', !state.freedom);
+  $('#freedom-toggle').checked = !!state.freedom;
+  $('#ai-toggle').disabled = !!state.freedom;
   $('#match-number').textContent = 'Партия №' + (state.round || 1);
   $('#turn-banner').textContent = !state.players.b
     ? 'Ожидание второго игрока'
     : state.status.over ? state.status.text
-      : state.clock?.paused ? 'Пауза — ожидаем подключения игрока'
+      : state.freedom ? '∞ Свобода хода · ' + (state.turn === seat ? 'твой ход' : 'ход соперника')
+        : state.clock?.paused ? 'Пауза — ожидаем подключения игрока'
         : (state.turn === seat ? '● Твой ход' : '● Ход соперника') + ' · ' + (state.turn === 'w' ? 'ходят белые' : 'ходят чёрные');
-  $('#turn-banner').classList.toggle('your-turn', !state.status.over && !!state.players.b && !state.clock?.paused && state.turn === seat);
+  $('#turn-banner').classList.toggle('your-turn', !state.status.over &&
+    !!state.players.b && (state.freedom || !state.clock?.paused) && state.turn === seat);
   updateClocks();
   const moves = $('#moves'); moves.replaceChildren();
   if (!state.moves.length) { const el = document.createElement('span'); el.className='muted'; el.textContent='Пока ходов нет'; moves.append(el); }
@@ -428,8 +460,8 @@ function render() {
   if (!state.chat.length) { const el=document.createElement('span'); el.className='muted'; el.textContent='Сообщений пока нет'; chat.append(el); }
   state.chat.forEach(entry => { const item = document.createElement('div'); item.className='chat-message'; const who=document.createElement('strong'); who.textContent=entry.name; const content=document.createElement('span'); content.textContent=entry.message; item.append(who,content); chat.append(item); });
   chat.scrollTop=chat.scrollHeight;
-  $('#resign').disabled = !state.players.b || state.status.over;
-  $('#rematch').classList.toggle('hidden', !state.status.over);
+  $('#resign').disabled = !state.players.b || state.status.over || !!state.freedom;
+  $('#rematch').classList.toggle('hidden', !state.status.over || !!state.freedom);
   $('#rematch').textContent = state.rematch[seat] ? 'Ожидаем согласия друга…' : 'Сыграть ещё раз';
   $('#rematch').disabled = !!state.rematch[seat];
   renderCapturedPieces();
@@ -510,6 +542,23 @@ $('#settings-overlay').addEventListener('click', event => {
 });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') $('#settings-overlay').classList.add('hidden');
+});
+$('#freedom-toggle').addEventListener('change', event => {
+  const desired = event.target.checked;
+  if (!isRoomOwner || !roomCode) {
+    event.target.checked = !!state?.freedom;
+    return;
+  }
+  if (!desired && !confirm('Выключить свободу хода и начать обычную партию с начальной позиции?')) {
+    event.target.checked = true;
+    return;
+  }
+  socket.emit('set-freedom', { enabled: desired }, response => {
+    if (response?.error) {
+      event.target.checked = !!state?.freedom;
+      toast(response.error);
+    }
+  });
 });
 $('#ai-level').addEventListener('change', event => {
   if (!isRoomOwner) return;

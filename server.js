@@ -22,9 +22,12 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 function cleanName(value) { return String(value || '').trim().slice(0, 24) || 'Игрок'; }
 function codeForRoom() {
+  // Six easy-to-read characters; no 0/O or 1/I confusion.
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code;
-  do { code = crypto.randomBytes(5).toString('hex').toUpperCase(); }
-  while (rooms.has(code));
+  do {
+    code = [...crypto.randomBytes(6)].map(byte => alphabet[byte & 31]).join('');
+  } while (rooms.has(code));
   return code;
 }
 function secretToken() { return crypto.randomBytes(24).toString('hex'); }
@@ -83,6 +86,7 @@ function createRoomFor(socket, name, requestedTime) {
     chat: [],
     rematch: { w:false, b:false },
     result: null,
+    freedom: null,
     aiEnabled: false,
     aiLevel: 8,
     aiPending: false,
@@ -115,6 +119,11 @@ function isOwner(room, socket) {
   return !!color && room.players[color]?.token === room.ownerToken;
 }
 function gameStatus(room) {
+  if (room.freedom) return {
+    over: false,
+    text: '∞ Свобода хода — ход ' + (room.freedom.turn === 'w' ? 'белых' : 'чёрных'),
+    cause: 'freedom'
+  };
   if (room.result) return room.result;
   const game = room.game;
   if (game.isCheckmate()) return { over: true, text: `Мат! Победили ${game.turn() === 'w' ? 'чёрные' : 'белые'}.`, cause: 'checkmate' };
@@ -132,8 +141,68 @@ function clockView(room) {
     deadline: clock.deadline,
     serverTime: Date.now(),
     paused: clock.deadline === null,
-    active: room.game.turn()
+    active: room.freedom ? room.freedom.turn : room.game.turn()
   };
+}
+
+// Freedom mode owns its own board. It never calls chess.js move()/load()
+// for arbitrary moves, so check, checkmate and missing kings cannot corrupt
+// the ordinary game engine. It is still synchronized and validated server-side.
+function freeBoardFromFen(fen) {
+  const board = {};
+  const rows = fen.split(' ')[0].split('/');
+  for (let rank = 0; rank < 8; rank++) {
+    let file = 0;
+    for (const c of rows[rank]) {
+      if (/^[1-8]$/.test(c)) file += Number(c);
+      else board['abcdefgh'[file++] + (8 - rank)] = c;
+    }
+  }
+  return board;
+}
+function freeFen(free) {
+  const rows = [];
+  for (let rank = 8; rank >= 1; rank--) {
+    let text = '', empty = 0;
+    for (const file of 'abcdefgh') {
+      const piece = free.board[file + rank];
+      if (!piece) empty++;
+      else {
+        if (empty) text += empty;
+        empty = 0;
+        text += piece;
+      }
+    }
+    if (empty) text += empty;
+    rows.push(text);
+  }
+  return rows.join('/') + ' ' + free.turn + ' - - 0 1';
+}
+function freeCaptureHistory(room) {
+  return room.freedom ? room.freedom.captures : capturedPieces(room);
+}
+function moveFreely(room, color, from, to, promotion) {
+  const free = room.freedom;
+  if (!free || from === to) throw new Error('Выбери другую клетку.');
+  const piece = free.board[from];
+  if (!piece) throw new Error('На исходной клетке нет фигуры.');
+  const owned = (piece === piece.toUpperCase() ? 'w' : 'b');
+  if (owned !== color || free.turn !== color) throw new Error('Сейчас не твой ход.');
+  const victim = free.board[to];
+  if (victim && (victim === victim.toUpperCase() ? 'w' : 'b') === color) {
+    throw new Error('Нельзя съесть свою фигуру.');
+  }
+  if (victim) free.captures[victim === victim.toUpperCase() ? 'w' : 'b'].push(victim.toLowerCase());
+  delete free.board[from];
+  const rank = to[1];
+  const promotionRank = color === 'w' ? '8' : '1';
+  const promoting = piece.toLowerCase() === 'p' && rank === promotionRank;
+  const newType = ['q','r','b','n'].includes(promotion) ? promotion : 'q';
+  free.board[to] = promoting ? (color === 'w' ? newType.toUpperCase() : newType) : piece;
+  const notation = piece.toUpperCase() + from + (victim ? 'x' : '–') + to +
+    (promoting ? '=' + newType.toUpperCase() : '');
+  free.moves.push(notation);
+  free.turn = color === 'w' ? 'b' : 'w';
 }
 function capturedPieces(room) {
   const captured = { w: [], b: [] };
@@ -149,17 +218,20 @@ function capturedPieces(room) {
 function view(room) {
   return {
     code: room.code,
-    fen: room.game.fen(),
-    turn: room.game.turn(),
+    fen: room.freedom ? freeFen(room.freedom) : room.game.fen(),
+    turn: room.freedom ? room.freedom.turn : room.game.turn(),
     status: gameStatus(room),
     players: { w: playerView(room.players.w), b: playerView(room.players.b) },
-    moves: room.game.history(),
-    captures: capturedPieces(room),
-    legal: room.game.moves({ verbose: true }).map(move => ({ from: move.from, to: move.to, promotion: move.promotion || '' })),
+    moves: room.freedom ? room.freedom.moves : room.game.history(),
+    captures: freeCaptureHistory(room),
+    // Freedom moves are calculated client-side for highlighting and
+    // individually validated on the server to avoid huge payloads.
+    legal: room.freedom ? [] : room.game.moves({ verbose: true }).map(move => ({ from: move.from, to: move.to, promotion: move.promotion || '' })),
     chat: room.chat,
     rematch: { ...room.rematch },
     clock: clockView(room),
-    round: room.round
+    round: room.round,
+    freedom: !!room.freedom
   };
 }
 function broadcast(room) {
@@ -183,7 +255,7 @@ function pauseClock(room) {
   }
 }
 function resumeClock(room) {
-  if (gameStatus(room).over || !connected(room) || room.clock.deadline !== null) return;
+  if (room.freedom || gameStatus(room).over || !connected(room) || room.clock.deadline !== null) return;
   room.clock.deadline = Date.now() + room.clock.remainingMs;
 }
 function endGame(room, result) {
@@ -193,7 +265,7 @@ function endGame(room, result) {
   broadcast(room);
 }
 function enforceClock(room) {
-  if (!room.clock.deadline || gameStatus(room).over || !connected(room)) return false;
+  if (room.freedom || !room.clock.deadline || gameStatus(room).over || !connected(room)) return false;
   if (Date.now() < room.clock.deadline) return false;
   const loser = room.game.turn();
   room.clock.remainingMs = 0;
@@ -210,7 +282,7 @@ function nextTurnClock(room) {
   if (!gameStatus(room).over) resumeClock(room);
 }
 function scheduleAI(room) {
-  if (!room.aiEnabled || room.aiPending || !connected(room) ||
+  if (room.freedom || !room.aiEnabled || room.aiPending || !connected(room) ||
       room.game.turn() !== ownerColor(room) || gameStatus(room).over) return;
   const fen = room.game.fen();
   const generation = room.aiGeneration;
@@ -404,24 +476,67 @@ io.on('connection', socket => {
     if (!room || !color) return sendAck(ack, { error: 'Сначала войди в комнату.' });
     if (enforceClock(room) || gameStatus(room).over) return sendAck(ack, { error: 'Партия закончена.' });
     if (!connected(room)) return sendAck(ack, { error: 'Подожди возвращения соперника.' });
-    if (room.game.turn() !== color) return sendAck(ack, { error: 'Сейчас ход соперника.' });
+    if ((room.freedom ? room.freedom.turn : room.game.turn()) !== color) {
+      return sendAck(ack, { error: 'Сейчас ход соперника.' });
+    }
     if (isOwner(room, socket) && room.aiEnabled) return sendAck(ack, { error: 'Отключи Stockfish, чтобы ходить самостоятельно.' });
     if (!/^[a-h][1-8]$/.test(data?.from) || !/^[a-h][1-8]$/.test(data?.to)) return sendAck(ack, { error: 'Некорректный ход.' });
     const promotion = ['q','r','b','n'].includes(data?.promotion) ? data.promotion : 'q';
     try {
-      room.game.move({ from: data.from, to: data.to, promotion });
-      nextTurnClock(room);
+      if (room.freedom) {
+        moveFreely(room, color, data.from, data.to, promotion);
+      } else {
+        room.game.move({ from: data.from, to: data.to, promotion });
+        nextTurnClock(room);
+      }
       room.rematch = { w: false, b: false };
       broadcast(room);
       sendAck(ack, { ok: true });
-    } catch {
-      sendAck(ack, { error: 'Так ходить нельзя.' });
+    } catch (error) {
+      sendAck(ack, { error: room.freedom ? error.message : 'Так ходить нельзя.' });
     }
+  });
+
+  // Changing the rules affects the whole room, so only its creator controls it.
+  // Returning to regular chess always starts a fresh position.
+  socket.on('set-freedom', (data, ack) => {
+    const room = rooms.get(socket.data.code);
+    if (!room || !isOwner(room, socket)) {
+      return sendAck(ack, { error: 'Включать режим свободы может только создатель лобби.' });
+    }
+    const desired = data?.enabled === true;
+    if (desired === !!room.freedom) return sendAck(ack, { ok: true });
+    if (desired) {
+      pauseClock(room);
+      room.freedom = {
+        board: freeBoardFromFen(room.game.fen()),
+        turn: room.game.turn(),
+        moves: room.game.history(),
+        captures: capturedPieces(room)
+      };
+      room.result = null; // Keep playing even after checkmate / time loss.
+      room.rematch = { w: false, b: false };
+      stopAI(room);
+      sendOwnerSettings(socket, room);
+    } else {
+      room.freedom = null;
+      room.game = new Chess();
+      room.result = null;
+      room.rematch = { w: false, b: false };
+      stopAI(room);
+      room.clock.remainingMs = room.clock.perMoveMs;
+      room.clock.deadline = null;
+      sendOwnerSettings(socket, room);
+      resumeClock(room);
+    }
+    broadcast(room);
+    sendAck(ack, { ok: true });
   });
 
   socket.on('toggle-ai', (_data, ack) => {
     const room = rooms.get(socket.data.code);
     if (!room || !isOwner(room, socket)) return sendAck(ack, { error: 'Только создатель комнаты управляет Stockfish.' });
+    if (room.freedom) return sendAck(ack, { error: 'Stockfish недоступен в режиме свободы хода.' });
     room.aiEnabled = !room.aiEnabled;
     room.aiGeneration++;
     sendOwnerSettings(socket, room);
@@ -458,7 +573,7 @@ io.on('connection', socket => {
   socket.on('resign', (_data, ack) => {
     const room = rooms.get(socket.data.code);
     const color = room && getPlayer(room, socket);
-    if (!room || !color || gameStatus(room).over) return sendAck(ack, { error: 'Нельзя сдаться сейчас.' });
+    if (!room || !color || gameStatus(room).over || room.freedom) return sendAck(ack, { error: 'Сдача недоступна в свободном режиме.' });
     if (!room.players.b) return sendAck(ack, { error: 'Соперник ещё не вошёл.' });
     endGame(room, { cause: 'resign', text: `${color === 'w' ? 'Белые' : 'Чёрные'} сдались. Победил соперник.` });
     sendAck(ack, { ok: true });
@@ -468,6 +583,7 @@ io.on('connection', socket => {
     const room = rooms.get(socket.data.code);
     const color = room && getPlayer(room, socket);
     if (!room || !color || !room.players.b) return sendAck(ack, { error: 'Нужны два игрока.' });
+    if (room.freedom) return sendAck(ack, { error: 'Для новой партии отключи свободу хода в настройках.' });
     if (!gameStatus(room).over) return sendAck(ack, { error: 'Завершите партию.' });
     room.rematch[color] = true;
     if (room.rematch.w && room.rematch.b) {

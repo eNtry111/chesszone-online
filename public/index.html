@@ -30,7 +30,7 @@
         </div>
       </div>
       <div class="field time-select-field"><label for="move-time">Время на каждый ход</label><select id="move-time"><option value="30000">30 секунд</option><option value="60000" selected>1 минута</option><option value="120000">2 минуты</option></select></div>
-      <div class="lobby-actions"><button class="btn primary" id="create">＋ Создать комнату</button><span class="or">или</span><input id="room-input" aria-label="Код комнаты" maxlength="10" placeholder="Код комнаты" /><button class="btn secondary" id="join">Присоединиться</button></div>
+      <div class="lobby-actions"><button class="btn primary" id="create">＋ Создать комнату</button><span class="or">или</span><input id="room-input" aria-label="Код комнаты" maxlength="6" placeholder="6 символов" /><button class="btn secondary" id="join">Присоединиться</button></div>
       <section class="nickname-invite-box" aria-label="Пригласить друга по никнейму">
         <h3>✉ Пригласить друга по никнейму</h3>
         <p>Введи ник игрока, который сейчас на сайте. Комната создастся автоматически.</p>
@@ -51,6 +51,7 @@
           <div id="captured-top" class="captured-pieces" aria-live="polite"></div>
           <span id="captured-top-count" class="capture-count">0</span>
         </div>
+        <div id="freedom-banner" class="freedom-banner hidden" role="status">∞ Свобода хода включена — шах и мат не останавливают партию</div>
         <div class="board-info-line"><span id="match-number" class="match-number">Партия №1</span><span class="rotation-hint">↻ После реванша цвета поменяются</span></div>
         <div id="turn-banner" class="turn-banner" role="status">Ожидание второго игрока</div>
         <div id="board" class="board" aria-label="Шахматная доска"></div>
@@ -66,7 +67,7 @@
           <button class="tool-btn" id="leave-to-menu" type="button" title="Главное меню">← Главное меню</button>
           <button class="tool-btn" id="open-settings" type="button" title="Настройки звука и игры">⚙ Настройки</button>
         </div>
-        <div class="panel-section room-section"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Отправь эту ссылку другу — он зайдёт в твою партию.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button>
+        <div class="panel-section room-section"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Короткий код из 6 символов. Отправь ссылку или пригласи по нику.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button>
           <form id="room-nickname-invite-form" class="nickname-invite-form room-invite-form">
             <input id="room-nickname-invite-target" maxlength="24" placeholder="Ник друга" aria-label="Ник друга" required spellcheck="false" />
             <button type="submit" class="btn secondary">Позвать</button>
@@ -113,6 +114,14 @@
           <button type="button" class="btn secondary" id="reset-theme">↩ Сбросить</button>
         </div>
         <p class="settings-hint">Твои цвета сохраняются в этом браузере. У друга могут быть свои.</p>
+      </section>
+      <section id="freedom-settings" class="freedom-settings hidden">
+        <label class="settings-row" for="freedom-toggle">
+          <span>∞ Свобода хода</span>
+          <input type="checkbox" id="freedom-toggle">
+        </label>
+        <p class="settings-hint">Разрешает любые перемещения своих фигур на пустые клетки и клетки соперника, даже при шахе, мате или после поражения. Свою фигуру съесть нельзя. Правила действуют для обоих игроков, таймер останавливается, Stockfish выключается.</p>
+        <p class="settings-hint"><strong>Важно:</strong> при выключении режима начинается новая обычная партия с начальной позиции.</p>
       </section>
       <div id="owner-ai-level" class="ai-difficulty hidden">
         <label class="setting-label" for="ai-level">Сложность Stockfish</label>

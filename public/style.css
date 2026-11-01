@@ -285,3 +285,26 @@ body {
   .nickname-invite-form { flex-direction:column; }
   .nickname-invite-box { padding:16px; }
 }
+
+
+/* Short room IDs and room-wide free-move variant */
+#room-code { letter-spacing: .12em; font-size: 28px; font-variant-numeric: tabular-nums; }
+#room-input { letter-spacing: .06em; text-transform: uppercase; }
+.freedom-settings {
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+  margin-bottom: 18px;
+}
+.freedom-settings .settings-row { margin-bottom: 7px; }
+.freedom-settings .settings-hint { margin-bottom: 9px; }
+.freedom-banner {
+  margin: 5px 0 9px;
+  padding: 11px 13px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #5b467a;
+  background: #f0e8ff;
+  border: 1px solid #d3bbf2;
+  border-radius: 10px;
+  text-align: center;
+}
