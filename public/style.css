@@ -238,3 +238,50 @@ body {
 @media(max-width:390px) {
   .theme-presets { grid-template-columns: 1fr; }
 }
+
+
+/* Online nicknames and direct invitation UI */
+.nick-register-row {
+  display:flex; align-items:center; flex-wrap:wrap;
+  gap:10px; margin-top:10px;
+}
+.nick-register-row .btn { padding:9px 12px; }
+.nick-status { font-size:12px; line-height:1.45; color:#397f62; overflow-wrap:anywhere; }
+.nick-status.error { color:#b44764; }
+.nickname-invite-box {
+  margin-top:24px; padding:20px; border-radius:17px;
+  border:1px solid var(--line);
+  background:color-mix(in srgb,var(--bg) 32%,white);
+}
+.nickname-invite-box h3 { margin:0 0 7px; font-size:17px; }
+.nickname-invite-box p { font-size:12px; margin:0 0 13px; }
+.nickname-invite-form { display:flex; align-items:stretch; gap:8px; }
+.nickname-invite-form input { min-width:0; flex:1; }
+.room-invite-form { margin-top:12px; }
+.invite-feedback {
+  min-height:1em; margin:9px 0 0!important;
+  color:color-mix(in srgb,var(--site-accent) 83%,black);
+  font-size:12px; line-height:1.5; overflow-wrap:anywhere;
+}
+.incoming-invite-dialog {
+  width:min(440px,100%); padding:29px; text-align:center;
+  background:var(--paper); border:1px solid var(--line);
+  box-shadow:0 17px 64px #281a3266; border-radius:22px;
+}
+.invite-decoration {
+  display:grid; place-items:center;
+  width:60px; height:60px; margin:0 auto 16px;
+  color:var(--site-accent); font-size:43px;
+  border-radius:15px;
+  background:color-mix(in srgb,var(--site-accent) 12%,white);
+}
+.incoming-invite-dialog h2 { margin:0 0 12px; font-size:23px; }
+.incoming-invite-dialog p { font-size:14px; margin:0 0 12px; }
+.incoming-invite-dialog strong { color:var(--site-accent); }
+.incoming-invite-dialog .invite-time-note { font-size:12px; }
+.invite-decision-actions { display:flex; justify-content:center; gap:11px; margin-top:20px; }
+.invite-decision-actions .btn { flex:1; }
+@media(max-width:480px) {
+  .nickname-invite-form { flex-direction:column; }
+  .nickname-invite-box { padding:16px; }
+}

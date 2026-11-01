@@ -21,9 +21,25 @@
 
     <section id="lobby" class="lobby card">
       <div class="lobby-top"><div class="illustration">♙ ♘ ♕</div><div><h2>Начнём партию?</h2><p>Ты играешь белыми, твой друг — чёрными.</p></div></div>
-      <div class="field"><label for="name">Твоё имя</label><input id="name" maxlength="24" placeholder="Например, Alex" autocomplete="nickname" /></div>
+      <div class="field">
+        <label for="name">Твой ник на ChessZone</label>
+        <input id="name" maxlength="24" placeholder="Например, Alex_2026" autocomplete="nickname" spellcheck="false" />
+        <div class="nick-register-row">
+          <button class="btn secondary" type="button" id="register-nick">✓ Сохранить ник</button>
+          <span id="nick-status" class="nick-status" role="status">Выбери ник для получения приглашений</span>
+        </div>
+      </div>
       <div class="field time-select-field"><label for="move-time">Время на каждый ход</label><select id="move-time"><option value="30000">30 секунд</option><option value="60000" selected>1 минута</option><option value="120000">2 минуты</option></select></div>
       <div class="lobby-actions"><button class="btn primary" id="create">＋ Создать комнату</button><span class="or">или</span><input id="room-input" aria-label="Код комнаты" maxlength="10" placeholder="Код комнаты" /><button class="btn secondary" id="join">Присоединиться</button></div>
+      <section class="nickname-invite-box" aria-label="Пригласить друга по никнейму">
+        <h3>✉ Пригласить друга по никнейму</h3>
+        <p>Введи ник игрока, который сейчас на сайте. Комната создастся автоматически.</p>
+        <form id="nickname-invite-form" class="nickname-invite-form">
+          <input id="nickname-invite-target" maxlength="24" placeholder="Ник друга" aria-label="Ник друга" required spellcheck="false" />
+          <button type="submit" class="btn primary">Пригласить</button>
+        </form>
+        <p id="nickname-invite-status" class="invite-feedback" role="status" aria-live="polite"></p>
+      </section>
       <p class="note">В первой партии создатель играет белыми, в следующей — чёрными. После каждого реванша цвета меняются. Ссылка localhost работает только на твоём компьютере.</p>
     </section>
 
@@ -50,7 +66,13 @@
           <button class="tool-btn" id="leave-to-menu" type="button" title="Главное меню">← Главное меню</button>
           <button class="tool-btn" id="open-settings" type="button" title="Настройки звука и игры">⚙ Настройки</button>
         </div>
-        <div class="panel-section room-section"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Отправь эту ссылку другу — он зайдёт в твою партию.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button></div>
+        <div class="panel-section room-section"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Отправь эту ссылку другу — он зайдёт в твою партию.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button>
+          <form id="room-nickname-invite-form" class="nickname-invite-form room-invite-form">
+            <input id="room-nickname-invite-target" maxlength="24" placeholder="Ник друга" aria-label="Ник друга" required spellcheck="false" />
+            <button type="submit" class="btn secondary">Позвать</button>
+          </form>
+          <p id="room-nickname-invite-status" class="invite-feedback" role="status" aria-live="polite"></p>
+        </div>
         <div class="panel-section"><div class="tiny-label">ПАРТИЯ</div><div id="game-status" class="status">Ход белых</div><div id="moves" class="moves"><span class="muted">Пока ходов нет</span></div><div class="action-row"><button class="btn secondary hidden" id="ai-toggle">🤖 ИИ: выключен</button><button class="btn secondary" id="resign">Сдаться</button><button class="btn secondary hidden" id="rematch">Реванш</button></div></div>
         <div class="panel-section chat-section"><div class="tiny-label">ЧАТ КОМНАТЫ</div><div id="chat-list" class="chat-list"><div class="muted">Напиши другу первое сообщение 🙂</div></div><form id="chat-form" class="chat-form"><input id="chat-text" maxlength="350" placeholder="Написать сообщение..." autocomplete="off" aria-label="Сообщение" /><button class="btn primary" aria-label="Отправить">➤</button></form></div>
       </aside>
@@ -101,6 +123,18 @@
       <div class="sound-test-actions">
         <button class="btn primary" type="button" id="test-sound">▶ Звук хода</button>
         <button class="btn secondary" type="button" id="test-capture-sound">▶ Когда съедают мою фигуру</button>
+      </div>
+    </div>
+  </div>
+  <div id="incoming-invite-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="incoming-invite-title">
+    <div class="incoming-invite-dialog">
+      <div class="invite-decoration">♞</div>
+      <h2 id="incoming-invite-title">Тебя приглашают в шахматы!</h2>
+      <p><strong id="incoming-invite-from"></strong> предлагает сыграть партию в ChessZone.</p>
+      <p class="invite-time-note">Приглашение действительно 45 секунд.</p>
+      <div class="invite-decision-actions">
+        <button type="button" class="btn primary" id="accept-nickname-invite">✓ Принять</button>
+        <button type="button" class="btn secondary" id="decline-nickname-invite">✕ Отклонить</button>
       </div>
     </div>
   </div>

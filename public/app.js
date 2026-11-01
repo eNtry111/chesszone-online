@@ -8,6 +8,7 @@ let selected = null;
 let pendingPromotion = null;
 let roomCode = null;
 let aiEnabled = false;
+let activeIncomingInvite = null;
 let clockOffset = 0;
 const soundPrefs = {
   enabled: localStorage.getItem('chesszone:sound') !== 'off',
@@ -153,6 +154,7 @@ function enterRoom({ code, color, token, owner }) {
   history.replaceState(null, '', `?room=${encodeURIComponent(code)}`);
   $('#lobby').classList.add('hidden'); $('#game').classList.remove('hidden');
   $('#room-code').textContent = code;
+  closeIncomingInvite();
 }
 function submitJoin(code) {
   const normalized = String(code || '').trim().toUpperCase();
@@ -172,6 +174,82 @@ $('#create').addEventListener('click', createRoom);
 $('#join').addEventListener('click', () => submitJoin($('#room-input').value));
 $('#room-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitJoin(e.target.value); });
 $('#name').value = localStorage.getItem('chesszone:name') || '';
+
+function showNicknameStatus(message, error = false) {
+  $('#nick-status').textContent = message;
+  $('#nick-status').classList.toggle('error', error);
+}
+function registerMyNickname() {
+  const name = $('#name').value.trim();
+  if (!socket.connected) return showNicknameStatus('Нет подключения к серверу.', true);
+  if (!name) return showNicknameStatus('Введи ник, прежде чем сохранять.', true);
+  socket.emit('register-nickname', { name }, reply => {
+    if (reply?.error) return showNicknameStatus(reply.error, true);
+    localStorage.setItem('chesszone:name', reply.name);
+    showNicknameStatus('✓ Онлайн под ником '+reply.name+'. Тебя можно пригласить.');
+  });
+}
+$('#register-nick').addEventListener('click', registerMyNickname);
+$('#name').addEventListener('input', () => {
+  showNicknameStatus('После изменения нажми «Сохранить ник».');
+});
+socket.on('nickname-ready', ({ name }) => {
+  $('#name').value = name;
+  localStorage.setItem('chesszone:name', name);
+  showNicknameStatus('✓ Онлайн под ником '+name+'. Тебя можно пригласить.');
+});
+
+function showInviteStatus(message) {
+  const text = String(message || '');
+  $('#nickname-invite-status').textContent = text;
+  $('#room-nickname-invite-status').textContent = text;
+  if (text && roomCode) toast(text);
+}
+function sendNicknameInvite(targetName) {
+  const target = String(targetName || '').trim();
+  if (!target) return showInviteStatus('Введи ник друга.');
+  socket.emit('invite-by-nick', {
+    target,
+    name: $('#name').value.trim() || localStorage.getItem('chesszone:name') || 'Игрок',
+    moveTimeMs: Number($('#move-time').value)
+  }, reply => showInviteStatus(reply?.error || reply?.text || 'Не удалось отправить приглашение.'));
+}
+$('#nickname-invite-form').addEventListener('submit', event => {
+  event.preventDefault();
+  sendNicknameInvite($('#nickname-invite-target').value);
+});
+$('#room-nickname-invite-form').addEventListener('submit', event => {
+  event.preventDefault();
+  sendNicknameInvite($('#room-nickname-invite-target').value);
+});
+function closeIncomingInvite(id = null) {
+  if (id && activeIncomingInvite?.id !== id) return;
+  activeIncomingInvite = null;
+  $('#incoming-invite-overlay').classList.add('hidden');
+}
+socket.on('incoming-invite', invite => {
+  if (roomCode) {
+    socket.emit('invite-reply', { id:invite.id, accept:false });
+    return;
+  }
+  activeIncomingInvite = invite;
+  $('#incoming-invite-from').textContent = invite.from;
+  $('#incoming-invite-overlay').classList.remove('hidden');
+  $('#accept-nickname-invite').focus();
+});
+socket.on('invite-closed', ({ id }) => closeIncomingInvite(id));
+socket.on('invite-feedback', ({ text }) => showInviteStatus(text));
+function replyToInvite(accept) {
+  const invitation = activeIncomingInvite;
+  if (!invitation) return;
+  closeIncomingInvite(invitation.id);
+  socket.emit('invite-reply', { id:invitation.id, accept }, reply => {
+    if (reply?.error) toast(reply.error);
+  });
+}
+$('#accept-nickname-invite').addEventListener('click', () => replyToInvite(true));
+$('#decline-nickname-invite').addEventListener('click', () => replyToInvite(false));
+
 let inviteCode = new URLSearchParams(location.search).get('room');
 if (inviteCode && /^[A-Fa-f0-9]{10}$/.test(inviteCode)) $('#room-input').value = inviteCode.toUpperCase();
 
@@ -179,9 +257,12 @@ socket.on('connect', () => {
   $('#connection').textContent = 'На связи'; $('#connection').classList.add('online');
   if (roomCode) submitJoin(roomCode);
   else if (inviteCode && savedToken(inviteCode.toUpperCase())) submitJoin(inviteCode);
+  else if ($('#name').value.trim()) registerMyNickname();
 });
 socket.on('disconnect', () => {
   $('#connection').textContent = 'Соединение потеряно'; $('#connection').classList.remove('online');
+  showNicknameStatus('Нет подключения к серверу.', true);
+  closeIncomingInvite();
 });
 socket.on('session-replaced', () => toast('Эта партия открылась в другой вкладке.'));
 socket.on('joined', enterRoom);
@@ -451,6 +532,8 @@ function showLobby() {
   $('#lobby').classList.remove('hidden');
   $('#settings-overlay').classList.add('hidden');
   $('#promotion').classList.add('hidden');
+  closeIncomingInvite();
+  showInviteStatus('');
 }
 socket.on('left-room', showLobby);
 $('#leave-to-menu').addEventListener('click', () => {

@@ -11,6 +11,11 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 20_000 });
 const rooms = new Map();
+const nicknameOwners = new Map(); // case-insensitive nickname -> socket.id
+const pendingInvites = new Map(); // secret invitation id -> invitation
+const invitesByTarget = new Map();
+const invitesBySender = new Map();
+const INVITE_LIFETIME_MS = 45000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -23,6 +28,72 @@ function codeForRoom() {
   return code;
 }
 function secretToken() { return crypto.randomBytes(24).toString('hex'); }
+
+function nicknameKey(value) { return value.toLocaleLowerCase('ru'); }
+function validateNickname(value) {
+  const name = String(value ?? '').trim();
+  if (!/^[\p{L}\p{N}_-]{2,24}$/u.test(name)) {
+    return { error: 'Ник: от 2 до 24 символов (буквы, цифры, _ или -), без пробелов.' };
+  }
+  return { name, key: nicknameKey(name) };
+}
+function registerNickname(socket, value) {
+  const parsed = validateNickname(value);
+  if (parsed.error) return parsed;
+  if (socket.data.nicknameKey === parsed.key) return { ok:true, name:socket.data.nickname };
+  if (socket.data.code) return { error:'Ник меняется только в главном меню.' };
+  const holder = nicknameOwners.get(parsed.key);
+  if (holder && holder !== socket.id && io.sockets.sockets.has(holder)) {
+    return { error:'Этот ник уже занят другим игроком онлайн.' };
+  }
+  const previous = socket.data.nicknameKey;
+  if (previous && nicknameOwners.get(previous) === socket.id) nicknameOwners.delete(previous);
+  socket.data.nicknameKey = parsed.key;
+  socket.data.nickname = parsed.name;
+  nicknameOwners.set(parsed.key, socket.id);
+  socket.emit('nickname-ready', { name: parsed.name });
+  return { ok:true, name:parsed.name };
+}
+function closeInvite(invite, senderMessage = null, notifyTarget = false) {
+  if (!invite || !pendingInvites.has(invite.id)) return;
+  pendingInvites.delete(invite.id);
+  if (invitesByTarget.get(invite.targetId) === invite.id) invitesByTarget.delete(invite.targetId);
+  if (invitesBySender.get(invite.senderId) === invite.id) invitesBySender.delete(invite.senderId);
+  clearTimeout(invite.timer);
+  if (senderMessage) io.to(invite.senderId).emit('invite-feedback', { text:senderMessage });
+  if (notifyTarget) io.to(invite.targetId).emit('invite-closed', { id:invite.id });
+}
+function cancelInvitesFor(socketId) {
+  for (const invite of [...pendingInvites.values()]) {
+    if (invite.senderId === socketId) closeInvite(invite, null, true);
+    else if (invite.targetId === socketId) {
+      closeInvite(invite, 'Приглашённый игрок больше не доступен.', false);
+    }
+  }
+}
+function createRoomFor(socket, name, requestedTime) {
+  const code = codeForRoom(), secret = secretToken();
+  const duration = [30000, 60000, 120000].includes(Number(requestedTime)) ? Number(requestedTime) : 60000;
+  const room = {
+    code,
+    game: new Chess(),
+    ownerToken: secret,
+    round: 1,
+    players: { w:{ name, token:secret, socketId:null }, b:null },
+    chat: [],
+    rematch: { w:false, b:false },
+    result: null,
+    aiEnabled: false,
+    aiLevel: 8,
+    aiPending: false,
+    aiGeneration: 0,
+    clock: { perMoveMs:duration, remainingMs:duration, deadline:null },
+    updated: Date.now()
+  };
+  rooms.set(code, room);
+  join(socket, room, 'w', secret);
+  return room;
+}
 function sendAck(ack, data) { if (typeof ack === 'function') ack(data); }
 function playerView(player) {
   return player ? { name: player.name, online: Boolean(player.socketId) } : null;
@@ -189,6 +260,7 @@ function join(socket, room, color, secret) {
   return true;
 }
 function leave(socket, sendResponse = true) {
+  cancelInvitesFor(socket.id);
   const room = rooms.get(socket.data.code);
   if (!room) { socket.data.code = null; socket.data.color = null; return; }
   const color = getPlayer(room, socket);
@@ -204,30 +276,22 @@ function leave(socket, sendResponse = true) {
 }
 
 io.on('connection', socket => {
+
+  // Registering a nickname makes the player discoverable while online.
+  socket.on('register-nickname', (data, ack) => {
+    if (invitesByTarget.has(socket.id)) {
+      return sendAck(ack, { error:'Сначала ответь на приглашение.' });
+    }
+    sendAck(ack, registerNickname(socket, data?.name));
+  });
+
   socket.on('create-room', (data, ack) => {
-    if (socket.data.code) return sendAck(ack, { error: 'Сначала выйди в главное меню.' });
-    const code = codeForRoom();
-    const duration = [30000, 60000, 120000].includes(Number(data?.moveTimeMs)) ? Number(data.moveTimeMs) : 60000;
-    const secret = secretToken();
-    const room = {
-      code,
-      game: new Chess(),
-      ownerToken: secret,
-      round: 1,
-      players: { w: { name: cleanName(data?.name), token: secret, socketId: null }, b: null },
-      chat: [],
-      rematch: { w: false, b: false },
-      result: null,
-      aiEnabled: false,
-      aiLevel: 8,
-      aiPending: false,
-      aiGeneration: 0,
-      clock: { perMoveMs: duration, remainingMs: duration, deadline: null },
-      updated: Date.now()
-    };
-    rooms.set(code, room);
-    join(socket, room, 'w', secret);
-    sendAck(ack, { ok: true });
+    if (socket.data.code) return sendAck(ack, { error:'Сначала выйди в главное меню.' });
+    const registered = registerNickname(socket, data?.name || socket.data.nickname || 'Игрок');
+    if (registered.error) return sendAck(ack, registered);
+    cancelInvitesFor(socket.id);
+    createRoomFor(socket, registered.name, data?.moveTimeMs);
+    sendAck(ack, { ok:true });
   });
 
   socket.on('join-room', (data, ack) => {
@@ -239,9 +303,94 @@ io.on('connection', socket => {
     const known = ['w', 'b'].find(c => room.players[c]?.token === supplied);
     const color = known || (!room.players.b ? 'b' : null);
     if (!color) return sendAck(ack, { error: 'Оба места уже заняты.' });
-    if (!room.players[color]) room.players[color] = { name: cleanName(data?.name), token: secretToken(), socketId: null };
+    const joinName = known ? room.players[color].name : (data?.name || socket.data.nickname || 'Игрок');
+    const registered = registerNickname(socket, joinName);
+    if (registered.error) return sendAck(ack, registered);
+    cancelInvitesFor(socket.id);
+    if (!room.players[color]) room.players[color] = { name: registered.name, token: secretToken(), socketId: null };
     join(socket, room, color, room.players[color].token);
     sendAck(ack, { ok: true });
+  });
+
+
+  // New rooms and existing waiting rooms can invite someone by online nickname.
+  socket.on('invite-by-nick', (data, ack) => {
+    const registered = registerNickname(socket, data?.name || socket.data.nickname || 'Игрок');
+    if (registered.error) return sendAck(ack, registered);
+    const requested = validateNickname(data?.target);
+    if (requested.error) return sendAck(ack, { error:'Введи правильный ник друга (2–24 символа).' });
+    if (requested.key === socket.data.nicknameKey) {
+      return sendAck(ack, { error:'Себя пригласить нельзя.' });
+    }
+    const targetId = nicknameOwners.get(requested.key);
+    const target = targetId && io.sockets.sockets.get(targetId);
+    if (!target) return sendAck(ack, { error:'Игрок не в сети. Он должен открыть ChessZone и сохранить ник.' });
+    if (target.data.code) return sendAck(ack, { error:'Игрок уже играет в другой партии.' });
+    if (invitesByTarget.has(target.id)) return sendAck(ack, { error:'Игрок уже получил другое приглашение.' });
+    if (invitesBySender.has(socket.id)) return sendAck(ack, { error:'Подожди ответа на предыдущее приглашение.' });
+    if (socket.data.lastInvite && Date.now()-socket.data.lastInvite < 3000) {
+      return sendAck(ack, { error:'Подожди пару секунд перед следующим приглашением.' });
+    }
+    let room = socket.data.code ? rooms.get(socket.data.code) : null;
+    if (socket.data.code && (!room || !getPlayer(room, socket))) {
+      return sendAck(ack, { error:'Твоя комната недоступна.' });
+    }
+    if (room && room.players.w && room.players.b) {
+      return sendAck(ack, { error:'В твоей комнате уже два игрока.' });
+    }
+    if (room && gameStatus(room).over) {
+      return sendAck(ack, { error:'Партия уже завершена. Создай новую комнату.' });
+    }
+    if (!room) room = createRoomFor(socket, registered.name, data?.moveTimeMs);
+
+    const invite = {
+      id:secretToken(), senderId:socket.id, targetId:target.id,
+      senderName:socket.data.nickname, targetName:target.data.nickname,
+      roomCode:room.code, timer:null
+    };
+    pendingInvites.set(invite.id, invite);
+    invitesBySender.set(socket.id, invite.id);
+    invitesByTarget.set(target.id, invite.id);
+    socket.data.lastInvite = Date.now();
+    invite.timer = setTimeout(() => {
+      closeInvite(invite, 'Время приглашения истекло — друг не ответил.', true);
+    }, INVITE_LIFETIME_MS);
+    invite.timer.unref();
+    target.emit('incoming-invite', {
+      id:invite.id, from:invite.senderName, expiresInSeconds:INVITE_LIFETIME_MS/1000
+    });
+    sendAck(ack, { ok:true, text:'Приглашение для '+invite.targetName+' отправлено. Ждём ответ…' });
+  });
+
+  socket.on('invite-reply', (data, ack) => {
+    const invite = pendingInvites.get(String(data?.id || ''));
+    if (!invite || invite.targetId !== socket.id) {
+      return sendAck(ack, { error:'Приглашение уже недействительно.' });
+    }
+    if (data?.accept !== true) {
+      closeInvite(invite, 'Игрок '+invite.targetName+' отклонил приглашение.', true);
+      return sendAck(ack, { ok:true });
+    }
+    const room = rooms.get(invite.roomCode);
+    const sender = io.sockets.sockets.get(invite.senderId);
+    if (!room || !sender || sender.data.code !== room.code || !getPlayer(room, sender)) {
+      closeInvite(invite, 'Отправитель уже вышел из комнаты.', true);
+      return sendAck(ack, { error:'Отправитель вышел из комнаты.' });
+    }
+    if (socket.data.code) {
+      closeInvite(invite, 'Игрок уже играет в другой партии.', true);
+      return sendAck(ack, { error:'Ты уже в другой партии.' });
+    }
+    const emptySeat = !room.players.b ? 'b' : !room.players.w ? 'w' : null;
+    if (!emptySeat || gameStatus(room).over) {
+      closeInvite(invite, 'В комнате больше нет свободного места.', true);
+      return sendAck(ack, { error:'В комнате больше нет свободного места.' });
+    }
+    const secret = secretToken();
+    room.players[emptySeat] = { name:socket.data.nickname, token:secret, socketId:null };
+    closeInvite(invite, 'Игрок '+invite.targetName+' принял приглашение!', true);
+    join(socket, room, emptySeat, secret);
+    sendAck(ack, { ok:true });
   });
 
   socket.on('leave-room', (_, ack) => {
@@ -355,7 +504,12 @@ io.on('connection', socket => {
     sendAck(ack, { ok: true });
   });
 
-  socket.on('disconnect', () => leave(socket, false));
+  socket.on('disconnect', () => {
+    leave(socket, false);
+    if (socket.data.nicknameKey && nicknameOwners.get(socket.data.nicknameKey) === socket.id) {
+      nicknameOwners.delete(socket.data.nicknameKey);
+    }
+  });
 });
 
 const ticker = setInterval(() => {
