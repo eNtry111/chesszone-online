@@ -220,9 +220,9 @@ function renderCapturedPieces() {
   // Нижняя — фигуры, которые забрал игрок внизу экрана.
   // Для гостя за чёрных всё правильно меняется местами.
   const opponentColor = seat === 'w' ? 'b' : 'w';
-  for (const [position, capturer, victim] of [
-    ['top', opponentColor, seat],
-    ['bottom', seat, opponentColor]
+  for (const [position, victim] of [
+    ['top', seat],
+    ['bottom', opponentColor]
   ]) {
     const container = $(`#captured-${position}`);
     const captured = state.captures?.[victim] || [];
@@ -237,12 +237,12 @@ function renderCapturedPieces() {
       container.append(piece);
     }
 
-    const capturerName = capturer === 'w' ? 'Белые' : 'Чёрные';
-    $(`#captured-${position}-title`).textContent = `${capturerName} взяли`;
+    const victimName = victim === 'w' ? 'белые' : 'чёрные';
+    $(`#captured-${position}-title`).textContent = `Съедены ${victimName}`;
     $(`#captured-${position}-count`).textContent = String(captured.length);
     $(`#captured-${position}-row`).setAttribute(
       'aria-label',
-      `${capturerName} взяли ${captured.length} фигур соперника`
+      `Съедены ${victimName} фигуры: ${captured.length}`
     );
   }
 }
