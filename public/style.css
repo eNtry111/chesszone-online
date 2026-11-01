@@ -60,3 +60,89 @@
   .panel-toolbar { padding: 11px; }
   .tool-btn { padding: 9px; }
 }
+
+
+/* Captured pieces: white losses on the left, black losses on the right */
+.container { max-width: 1350px; }
+.game {
+  grid-template-columns: minmax(0, 730px) minmax(285px, 1fr);
+}
+.board-column { max-width: 730px; }
+.board-stage {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 62px;
+  gap: 10px;
+  align-items: stretch;
+}
+.capture-tray {
+  background: rgba(255, 250, 253, .84);
+  border: 1px solid #efcfdf;
+  border-radius: 13px;
+  padding: 10px 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.capture-heading {
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: #9c5980;
+  text-align: center;
+  margin-bottom: 12px;
+}
+.captured-pieces {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 4px;
+  flex: 1;
+}
+.captured-piece {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  font: 25px/1 "Segoe UI Symbol", "DejaVu Sans", serif;
+  background: #f7eaf1;
+  user-select: none;
+}
+.captured-light {
+  color: #fffdf9;
+  text-shadow: -1px -1px 0 #584254, 1px 1px 0 #584254,
+               1px -1px 0 #584254, -1px 1px 0 #584254;
+}
+.captured-dark { color: #332431; }
+.capture-count {
+  margin-top: 9px;
+  border-radius: 8px;
+  background: #f5dfeb;
+  color: #98557c;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+.sound-test-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sound-test-actions .btn { flex: 1; }
+
+@media (max-width: 850px) {
+  .game { grid-template-columns: 1fr; }
+  .board-column { margin: auto; }
+}
+@media (max-width: 480px) {
+  .board-stage {
+    grid-template-columns: 39px minmax(0, 1fr) 39px;
+    gap: 4px;
+  }
+  .capture-tray { padding: 7px 2px; border-radius: 9px; }
+  .capture-heading { font-size: 8px; margin-bottom: 7px; }
+  .captured-pieces { gap: 1px; }
+  .captured-piece { font-size: 17px; border-radius: 4px; }
+  .capture-count { padding: 3px 5px; font-size: 10px; }
+}

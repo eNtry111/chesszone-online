@@ -47,6 +47,50 @@ function playMoveSound() {
   source.start(now); source.stop(now + 0.15);
 }
 
+// A short, low wooden tap with a little friction. Unlike the quiet move
+// swish, this plays only when a piece is actually captured.
+function playCaptureSound(myPieceWasTaken = false) {
+  const ctx = audio();
+  if (!ctx || soundPrefs.volume === 0) return;
+  const now = ctx.currentTime;
+  const volume = soundPrefs.volume / 100;
+  const duration = 0.17;
+  const samples = Math.floor(ctx.sampleRate * duration);
+  const buffer = ctx.createBuffer(1, samples, ctx.sampleRate);
+  const channel = buffer.getChannelData(0);
+  let smoothNoise = 0;
+  for (let i = 0; i < samples; i++) {
+    const seconds = i / ctx.sampleRate;
+    smoothNoise = 0.67 * smoothNoise + 0.33 * (Math.random() * 2 - 1);
+    channel[i] = smoothNoise * Math.exp(-seconds * 22);
+  }
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = myPieceWasTaken ? 650 : 900;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.18 * volume + 0.0001, now + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+  noise.connect(filter).connect(gain).connect(ctx.destination);
+  noise.start(now);
+  noise.stop(now + duration);
+
+  const knock = ctx.createOscillator();
+  const knockGain = ctx.createGain();
+  const pitch = myPieceWasTaken ? 125 : 160;
+  knock.type = 'triangle';
+  knock.frequency.setValueAtTime(pitch, now);
+  knock.frequency.exponentialRampToValueAtTime(pitch * 0.66, now + 0.09);
+  knockGain.gain.setValueAtTime(0.0001, now);
+  knockGain.gain.exponentialRampToValueAtTime(0.085 * volume + 0.0001, now + 0.006);
+  knockGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+  knock.connect(knockGain).connect(ctx.destination);
+  knock.start(now);
+  knock.stop(now + 0.12);
+}
+
 // Quiet two-note falling tone to signal resignation.
 function playResignSound() {
   const ctx = audio();
@@ -135,8 +179,17 @@ socket.on('game-state', next => {
   if (next.clock) clockOffset = next.clock.serverTime - Date.now();
   state = next;
   selected = null;
-  if (previous && next.moves.length > previous.moves.length) playMoveSound();
-  if (previous && !previous.status.over && next.status.over && next.status.cause === 'resign') playResignSound();
+  if (previous && previous.code === next.code && next.moves.length > previous.moves.length) {
+    const newWhiteCaptures = (next.captures?.w?.length || 0) - (previous.captures?.w?.length || 0);
+    const newBlackCaptures = (next.captures?.b?.length || 0) - (previous.captures?.b?.length || 0);
+    if (newWhiteCaptures > 0 || newBlackCaptures > 0) {
+      playCaptureSound(seat === 'w' ? newWhiteCaptures > 0 : newBlackCaptures > 0);
+    } else {
+      playMoveSound();
+    }
+  }
+  if (previous && previous.code === next.code && !previous.status.over &&
+      next.status.over && next.status.cause === 'resign') playResignSound();
   render();
 });
 
@@ -156,6 +209,33 @@ function pieceMap(fen) {
   });
   return map;
 }
+const pieceNames = {
+  p: 'пешка', n: 'конь', b: 'слон',
+  r: 'ладья', q: 'ферзь'
+};
+function renderCapturedPieces() {
+  if (!state) return;
+  for (const [color, listSelector, countSelector] of [
+    ['w', '#captured-white', '#captured-white-count'],
+    ['b', '#captured-black', '#captured-black-count']
+  ]) {
+    const list = $(listSelector);
+    const taken = state.captures?.[color] || [];
+    list.replaceChildren();
+    for (const type of taken) {
+      const icon = document.createElement('span');
+      icon.className = `captured-piece ${color === 'w' ? 'captured-light' : 'captured-dark'}`;
+      icon.textContent = glyph[color + type] || '♟';
+      icon.title = `${color === 'w' ? 'Белая' : 'Чёрная'} фигура: ${pieceNames[type] || type}`;
+      icon.setAttribute('aria-label', icon.title);
+      list.append(icon);
+    }
+    const count = $(countSelector);
+    count.textContent = String(taken.length);
+    count.title = 'Всего съедено фигур: ' + taken.length;
+  }
+}
+
 function isMyTurn() {
   return state && state.turn === seat && state.players.w && state.players.b && !state.status.over && !aiEnabled && socket.connected;
 }
@@ -235,6 +315,7 @@ function render() {
   $('#rematch').classList.toggle('hidden', !state.status.over);
   $('#rematch').textContent = state.rematch[seat] ? 'Ожидаем согласия друга…' : 'Сыграть ещё раз';
   $('#rematch').disabled = !!state.rematch[seat];
+  renderCapturedPieces();
   renderBoard();
 }
 $('#copy-link').addEventListener('click', async () => {
@@ -304,6 +385,7 @@ $('#sound-volume').addEventListener('input', event => {
   localStorage.setItem('chesszone:volume', String(soundPrefs.volume));
 });
 $('#test-sound').addEventListener('click', playMoveSound);
+$('#test-capture-sound').addEventListener('click', () => playCaptureSound(true));
 $('#open-settings').addEventListener('click', () => $('#settings-overlay').classList.remove('hidden'));
 $('#close-settings').addEventListener('click', () => $('#settings-overlay').classList.add('hidden'));
 $('#settings-overlay').addEventListener('click', event => {

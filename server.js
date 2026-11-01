@@ -54,6 +54,17 @@ function clockView(room) {
     active: room.game.turn()
   };
 }
+function capturedPieces(room) {
+  const captured = { w: [], b: [] };
+  for (const move of room.game.history({ verbose: true })) {
+    if (move.captured) {
+      const victimColor = move.color === 'w' ? 'b' : 'w';
+      captured[victimColor].push(move.captured);
+    }
+  }
+  return captured;
+}
+
 function view(room) {
   return {
     code: room.code,
@@ -62,6 +73,7 @@ function view(room) {
     status: gameStatus(room),
     players: { w: playerView(room.players.w), b: playerView(room.players.b) },
     moves: room.game.history(),
+    captures: capturedPieces(room),
     legal: room.game.moves({ verbose: true }).map(move => ({ from: move.from, to: move.to, promotion: move.promotion || '' })),
     chat: room.chat,
     rematch: { ...room.rematch },
