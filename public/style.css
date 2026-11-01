@@ -138,3 +138,69 @@
   .captured-piece { width: 21px; height: 21px; font-size: 19px; border-radius: 4px; }
   .capture-count { padding: 3px 5px; font-size: 10px; }
 }
+
+
+/* Live personal theme editor: site background, buttons and board colours. */
+:root { --site-accent: #bd6591; }
+body {
+  background:
+    radial-gradient(ellipse at 8% -10%, color-mix(in srgb, var(--site-accent) 22%, transparent) 0%, transparent 45%),
+    var(--bg);
+}
+.header, .panel-toolbar { background: color-mix(in srgb, var(--bg) 38%, white); }
+.card, .panel, .settings-box {
+  background: color-mix(in srgb, var(--bg) 11%, white);
+  border-color: color-mix(in srgb, var(--site-accent) 24%, white);
+}
+.primary { background: var(--site-accent); }
+.primary:hover { background: color-mix(in srgb, var(--site-accent) 85%, black); }
+.pink, h1 em, .eyebrow { color: var(--site-accent); }
+.brand-mark, .turn-banner.your-turn { background: color-mix(in srgb, var(--site-accent) 24%, white); }
+.tool-btn, .secondary, .status, .turn-banner {
+  color: color-mix(in srgb, var(--site-accent) 75%, black);
+}
+.board-info-line {
+  display: flex; justify-content: space-between; gap: 8px;
+  align-items: center; margin: 7px 0;
+  font-size: 11px; color: #826477;
+}
+.match-number {
+  font-weight: 800; background: color-mix(in srgb, var(--site-accent) 16%, white);
+  color: color-mix(in srgb, var(--site-accent) 70%, black);
+  padding: 5px 9px; border-radius: 8px;
+}
+.theme-settings {
+  border-top: 1px solid var(--line);
+  padding-top: 15px; margin-bottom: 18px;
+}
+.theme-settings h3 { font-size: 15px; margin: 0 0 13px; }
+.theme-color-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.theme-color-field {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 7px; padding: 8px; border: 1px solid var(--line);
+  border-radius: 11px; font-size: 12px; font-weight: 700;
+  background: color-mix(in srgb, var(--bg) 9%, white);
+}
+.theme-color-field input[type="color"] {
+  padding: 0; min-width: 33px; width: 39px; height: 33px;
+  flex: 0 0 39px; border-radius: 8px; cursor: pointer;
+}
+.theme-presets, .theme-actions {
+  display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px;
+}
+.theme-preset {
+  border: 1px solid color-mix(in srgb, var(--site-accent) 32%, white);
+  border-radius: 9px; padding: 8px 10px;
+  font-size: 11px; font-weight: 700;
+  background: color-mix(in srgb, var(--bg) 22%, white);
+  color: var(--ink);
+}
+.theme-preset:hover { background: color-mix(in srgb, var(--site-accent) 17%, white); }
+.theme-actions .btn { flex: 1; white-space: normal; }
+@media (max-width: 480px) {
+  .rotation-hint { font-size: 9px; text-align: right; }
+  .theme-color-grid { grid-template-columns: 1fr; }
+}

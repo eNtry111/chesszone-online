@@ -24,17 +24,18 @@
       <div class="field"><label for="name">Твоё имя</label><input id="name" maxlength="24" placeholder="Например, Alex" autocomplete="nickname" /></div>
       <div class="field time-select-field"><label for="move-time">Время на каждый ход</label><select id="move-time"><option value="30000">30 секунд</option><option value="60000" selected>1 минута</option><option value="120000">2 минуты</option></select></div>
       <div class="lobby-actions"><button class="btn primary" id="create">＋ Создать комнату</button><span class="or">или</span><input id="room-input" aria-label="Код комнаты" maxlength="10" placeholder="Код комнаты" /><button class="btn secondary" id="join">Присоединиться</button></div>
-      <p class="note">Друг должен открыть этот же сайт по твоей ссылке. Локальный адрес localhost работает только на твоём компьютере.</p>
+      <p class="note">В первой партии создатель играет белыми, в следующей — чёрными. После каждого реванша цвета меняются. Ссылка localhost работает только на твоём компьютере.</p>
     </section>
 
     <section id="game" class="game hidden">
       <div class="board-column">
-        <div class="player-strip"><span class="avatar black">♚</span><div><strong id="opponent-name">Соперник</strong><small id="opponent-online">Ожидание подключения</small></div><span class="timer" id="opponent-timer" aria-label="Время соперника">1:00</span><span class="side-pill" id="opponent-color">Чёрные</span></div>
+        <div class="player-strip"><span class="avatar black" id="opponent-avatar">♚</span><div><strong id="opponent-name">Соперник</strong><small id="opponent-online">Ожидание подключения</small></div><span class="timer" id="opponent-timer" aria-label="Время соперника">1:00</span><span class="side-pill" id="opponent-color">Чёрные</span></div>
         <div id="captured-top-row" class="capture-row capture-row-top" aria-label="Фигуры, взятые верхним игроком">
           <span class="capture-heading" id="captured-top-title">Съедены белые</span>
           <div id="captured-top" class="captured-pieces" aria-live="polite"></div>
           <span id="captured-top-count" class="capture-count">0</span>
         </div>
+        <div class="board-info-line"><span id="match-number" class="match-number">Партия №1</span><span class="rotation-hint">↻ После реванша цвета поменяются</span></div>
         <div id="turn-banner" class="turn-banner" role="status">Ожидание второго игрока</div>
         <div id="board" class="board" aria-label="Шахматная доска"></div>
         <div id="captured-bottom-row" class="capture-row capture-row-bottom" aria-label="Фигуры, взятые нижним игроком">
@@ -42,7 +43,7 @@
           <div id="captured-bottom" class="captured-pieces" aria-live="polite"></div>
           <span id="captured-bottom-count" class="capture-count">0</span>
         </div>
-        <div class="player-strip"><span class="avatar white">♔</span><div><strong id="my-name">Ты</strong><small id="my-online">Подключено</small></div><span class="timer" id="my-timer" aria-label="Твоё время">1:00</span><span class="side-pill" id="my-color">Белые</span></div>
+        <div class="player-strip"><span class="avatar white" id="my-avatar">♔</span><div><strong id="my-name">Ты</strong><small id="my-online">Подключено</small></div><span class="timer" id="my-timer" aria-label="Твоё время">1:00</span><span class="side-pill" id="my-color">Белые</span></div>
       </div>
       <aside class="panel">
         <div class="panel-toolbar">
@@ -62,6 +63,26 @@
       <label class="settings-row" for="sound-toggle"><span>Звуки игры</span><input type="checkbox" id="sound-toggle" checked></label>
       <label class="setting-label" for="sound-volume">Громкость звуков <span id="volume-label">35%</span></label>
       <input type="range" id="sound-volume" min="0" max="100" step="5" value="35">
+      <section class="theme-settings" aria-label="Настройка оформления">
+        <h3>🎨 Оформление ChessZone</h3>
+        <div class="theme-color-grid">
+          <label class="theme-color-field" for="theme-light">Светлые клетки <input type="color" id="theme-light" value="#f8e9f1"></label>
+          <label class="theme-color-field" for="theme-dark">Тёмные клетки <input type="color" id="theme-dark" value="#c891ae"></label>
+          <label class="theme-color-field" for="theme-background">Фон сайта <input type="color" id="theme-background" value="#f9f0f5"></label>
+          <label class="theme-color-field" for="theme-accent">Кнопки и акценты <input type="color" id="theme-accent" value="#bd6591"></label>
+        </div>
+        <div class="theme-presets" aria-label="Готовые темы">
+          <button type="button" class="theme-preset" data-theme="pink">🌸 Розовая</button>
+          <button type="button" class="theme-preset" data-theme="classic">♟ Классика</button>
+          <button type="button" class="theme-preset" data-theme="ocean">🌊 Океан</button>
+          <button type="button" class="theme-preset" data-theme="night">🌙 Ночная</button>
+        </div>
+        <div class="theme-actions">
+          <button type="button" class="btn secondary" id="random-theme">🎲 Случайные цвета</button>
+          <button type="button" class="btn secondary" id="reset-theme">↩ Сбросить</button>
+        </div>
+        <p class="settings-hint">Твои цвета сохраняются в этом браузере. У друга могут быть свои.</p>
+      </section>
       <div id="owner-ai-level" class="ai-difficulty hidden">
         <label class="setting-label" for="ai-level">Сложность Stockfish</label>
         <select id="ai-level"><option value="2">Новичок</option><option value="8" selected>Средний</option><option value="18">Сильный</option></select>
@@ -70,7 +91,7 @@
       <p class="settings-hint">Время на ход выбирается при создании комнаты. Если соперник отключился, часы останавливаются.</p>
       <div class="sound-test-actions">
         <button class="btn primary" type="button" id="test-sound">▶ Звук хода</button>
-        <button class="btn secondary" type="button" id="test-capture-sound">▶ Звук взятия</button>
+        <button class="btn secondary" type="button" id="test-capture-sound">▶ Когда съедают мою фигуру</button>
       </div>
     </div>
   </div>

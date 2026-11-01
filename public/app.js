@@ -3,6 +3,7 @@ const $ = selector => document.querySelector(selector);
 const socket = io();
 let state = null;
 let seat = null;
+let isRoomOwner = false;
 let selected = null;
 let pendingPromotion = null;
 let roomCode = null;
@@ -122,18 +123,36 @@ function toast(message) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => el.classList.add('hidden'), 3400);
 }
 function savedToken(code) { return localStorage.getItem(`chesszone:${code}`) || ''; }
-function enterRoom({ code, color, token }) {
-  roomCode = code; seat = color; selected = null;
-  $('#ai-toggle').classList.toggle('hidden', color !== 'w');
-  $('#owner-ai-level').classList.toggle('hidden', color !== 'w');
-  if (color !== 'w') aiEnabled = false;
+function updateMySeat({ color, owner }) {
+  seat = color;
+  isRoomOwner = !!owner;
+  selected = null;
+  pendingPromotion = null;
+  $('#promotion').classList.add('hidden');
+
+  // Owner-only AI controls stay with the creator after colour swaps.
+  $('#ai-toggle').classList.toggle('hidden', !isRoomOwner);
+  $('#owner-ai-level').classList.toggle('hidden', !isRoomOwner);
+  if (!isRoomOwner) aiEnabled = false;
+
+  const other = color === 'w' ? 'b' : 'w';
+  $('#my-color').textContent = color === 'w' ? 'Белые' : 'Чёрные';
+  $('#opponent-color').textContent = other === 'w' ? 'Белые' : 'Чёрные';
+  const mine = $('#my-avatar'), theirs = $('#opponent-avatar');
+  mine.className = 'avatar ' + (color === 'w' ? 'white' : 'black');
+  theirs.className = 'avatar ' + (other === 'w' ? 'white' : 'black');
+  mine.textContent = color === 'w' ? '♔' : '♚';
+  theirs.textContent = other === 'w' ? '♔' : '♚';
+}
+
+function enterRoom({ code, color, token, owner }) {
+  roomCode = code;
+  updateMySeat({ color, owner });
   localStorage.setItem(`chesszone:${code}`, token);
   $('#settings-overlay').classList.add('hidden');
   history.replaceState(null, '', `?room=${encodeURIComponent(code)}`);
   $('#lobby').classList.add('hidden'); $('#game').classList.remove('hidden');
   $('#room-code').textContent = code;
-  $('#my-color').textContent = color === 'w' ? 'Белые' : 'Чёрные';
-  $('#opponent-color').textContent = color === 'w' ? 'Чёрные' : 'Белые';
 }
 function submitJoin(code) {
   const normalized = String(code || '').trim().toUpperCase();
@@ -166,8 +185,14 @@ socket.on('disconnect', () => {
 });
 socket.on('session-replaced', () => toast('Эта партия открылась в другой вкладке.'));
 socket.on('joined', enterRoom);
+socket.on('seat-updated', next => {
+  updateMySeat(next);
+  if (state) render();
+  toast('Новая партия №' + next.round + ': теперь ты играешь ' +
+    (next.color === 'w' ? 'белыми' : 'чёрными') + '.');
+});
 socket.on('ai-state', ({ enabled, level }) => {
-  if (seat !== 'w') return;
+  if (!isRoomOwner) return;
   aiEnabled = !!enabled;
   $('#ai-toggle').textContent = aiEnabled ? '🤖 Stockfish: включён' : '🤖 Stockfish: выключен';
   if ([2, 8, 18].includes(Number(level))) $('#ai-level').value = String(level);
@@ -182,11 +207,10 @@ socket.on('game-state', next => {
   if (previous && previous.code === next.code && next.moves.length > previous.moves.length) {
     const newWhiteCaptures = (next.captures?.w?.length || 0) - (previous.captures?.w?.length || 0);
     const newBlackCaptures = (next.captures?.b?.length || 0) - (previous.captures?.b?.length || 0);
-    if (newWhiteCaptures > 0 || newBlackCaptures > 0) {
-      playCaptureSound(seat === 'w' ? newWhiteCaptures > 0 : newBlackCaptures > 0);
-    } else {
-      playMoveSound();
-    }
+    // A special sound is heard only by the player whose piece was captured.
+    const lostMyPiece = seat === 'w' ? newWhiteCaptures > 0 : newBlackCaptures > 0;
+    if (lostMyPiece) playCaptureSound(true);
+    else playMoveSound();
   }
   if (previous && previous.code === next.code && !previous.status.over &&
       next.status.over && next.status.cause === 'resign') playResignSound();
@@ -305,6 +329,7 @@ function render() {
   $('#opponent-online').textContent = !state.players[them] ? 'Друг ещё не зашёл' : state.players[them].online ? 'В сети' : 'Не в сети';
   $('#my-online').textContent = state.players[seat]?.online ? 'В сети' : 'Переподключение';
   $('#game-status').textContent = state.players.b ? state.status.text : 'Ожидаем второго игрока';
+  $('#match-number').textContent = 'Партия №' + (state.round || 1);
   $('#turn-banner').textContent = !state.players.b
     ? 'Ожидание второго игрока'
     : state.status.over ? state.status.text
@@ -350,7 +375,7 @@ $('#rematch').addEventListener('click', () => {
 
 // Кнопка существует на странице, но показывается только создателю комнаты.
 $('#ai-toggle').addEventListener('click', () => {
-  if (seat !== 'w') return;
+  if (!isRoomOwner) return;
   socket.emit('toggle-ai', {}, response => {
     if (response?.error) toast(response.error);
   });
@@ -406,7 +431,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') $('#settings-overlay').classList.add('hidden');
 });
 $('#ai-level').addEventListener('change', event => {
-  if (seat !== 'w') return;
+  if (!isRoomOwner) return;
   socket.emit('set-ai-level', { level: Number(event.target.value) }, response => {
     if (response?.error) toast(response.error);
   });
@@ -416,6 +441,7 @@ function showLobby() {
   roomCode = null;
   inviteCode = null;
   seat = null;
+  isRoomOwner = false;
   state = null;
   aiEnabled = false;
   selected = null;
@@ -434,3 +460,67 @@ $('#leave-to-menu').addEventListener('click', () => {
     else showLobby();
   });
 });
+
+
+// Personal appearance settings are stored only in this browser.
+const defaultTheme = Object.freeze({
+  light: '#f8e9f1', dark: '#c891ae',
+  background: '#f9f0f5', accent: '#bd6591'
+});
+const themes = {
+  pink: defaultTheme,
+  classic: { light:'#eeeed2', dark:'#769656', background:'#f0f4e8', accent:'#568441' },
+  ocean: { light:'#e5eff9', dark:'#7b9dc3', background:'#edf4fc', accent:'#426fa8' },
+  night: { light:'#b3b6c7', dark:'#555c7b', background:'#22263a', accent:'#7777bf' },
+  peach: { light:'#ffe8d1', dark:'#d99375', background:'#fff1e5', accent:'#c47351' },
+  violet: { light:'#eee6ff', dark:'#a28bce', background:'#f6f0ff', accent:'#8358b6' }
+};
+const colorControls = {
+  light: '#theme-light',
+  dark: '#theme-dark',
+  background: '#theme-background',
+  accent: '#theme-accent'
+};
+function validColor(color) { return /^#[0-9a-fA-F]{6}$/.test(color); }
+function loadTheme() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('chesszone:theme') || '{}');
+    return Object.fromEntries(Object.entries(defaultTheme).map(([key, value]) =>
+      [key, validColor(saved[key]) ? saved[key] : value]
+    ));
+  } catch { return { ...defaultTheme }; }
+}
+let currentTheme = loadTheme();
+function setTheme(next) {
+  currentTheme = Object.fromEntries(Object.entries(defaultTheme).map(([key, fallback]) =>
+    [key, validColor(next[key]) ? next[key] : fallback]
+  ));
+  const root = document.documentElement;
+  root.style.setProperty('--light-square', currentTheme.light);
+  root.style.setProperty('--dark-square', currentTheme.dark);
+  root.style.setProperty('--bg', currentTheme.background);
+  root.style.setProperty('--site-accent', currentTheme.accent);
+  for (const [key, selector] of Object.entries(colorControls)) {
+    $(selector).value = currentTheme[key];
+  }
+  localStorage.setItem('chesszone:theme', JSON.stringify(currentTheme));
+}
+setTheme(currentTheme);
+for (const [key, selector] of Object.entries(colorControls)) {
+  $(selector).addEventListener('input', event => {
+    setTheme({ ...currentTheme, [key]: event.target.value });
+  });
+}
+document.querySelectorAll('[data-theme]').forEach(button => {
+  button.addEventListener('click', () => {
+    setTheme(themes[button.dataset.theme] || defaultTheme);
+  });
+});
+$('#random-theme').addEventListener('click', () => {
+  const options = Object.values(themes);
+  const available = options.filter(palette =>
+    Object.keys(defaultTheme).some(key => palette[key] !== currentTheme[key])
+  );
+  setTheme(available[Math.floor(Math.random() * available.length)] || defaultTheme);
+});
+$('#reset-theme').addEventListener('click', () => setTheme(defaultTheme));

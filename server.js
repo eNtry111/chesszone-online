@@ -33,6 +33,16 @@ function getPlayer(room, socket) {
   return null;
 }
 function connected(room) { return !!(room.players.w?.socketId && room.players.b?.socketId); }
+// Room creator is identified by a secret token, never by piece colour.
+function ownerColor(room) {
+  if (room.players.w?.token === room.ownerToken) return 'w';
+  if (room.players.b?.token === room.ownerToken) return 'b';
+  return null;
+}
+function isOwner(room, socket) {
+  const color = room && getPlayer(room, socket);
+  return !!color && room.players[color]?.token === room.ownerToken;
+}
 function gameStatus(room) {
   if (room.result) return room.result;
   const game = room.game;
@@ -77,7 +87,8 @@ function view(room) {
     legal: room.game.moves({ verbose: true }).map(move => ({ from: move.from, to: move.to, promotion: move.promotion || '' })),
     chat: room.chat,
     rematch: { ...room.rematch },
-    clock: clockView(room)
+    clock: clockView(room),
+    round: room.round
   };
 }
 function broadcast(room) {
@@ -86,7 +97,7 @@ function broadcast(room) {
   scheduleAI(room);
 }
 function sendOwnerSettings(socket, room) {
-  if (room.players.w?.socketId === socket.id) {
+  if (isOwner(room, socket)) {
     socket.emit('ai-state', { enabled: room.aiEnabled, level: room.aiLevel });
   }
 }
@@ -128,13 +139,16 @@ function nextTurnClock(room) {
   if (!gameStatus(room).over) resumeClock(room);
 }
 function scheduleAI(room) {
-  if (!room.aiEnabled || room.aiPending || !connected(room) || room.game.turn() !== 'w' || gameStatus(room).over) return;
+  if (!room.aiEnabled || room.aiPending || !connected(room) ||
+      room.game.turn() !== ownerColor(room) || gameStatus(room).over) return;
   const fen = room.game.fen();
   const generation = room.aiGeneration;
   const level = room.aiLevel;
   room.aiPending = true;
   bestMove(fen, level).then(uci => {
-    if (!room.aiEnabled || room.aiGeneration !== generation || room.game.fen() !== fen || !connected(room) || gameStatus(room).over || enforceClock(room)) return;
+    if (!room.aiEnabled || room.aiGeneration !== generation || room.game.fen() !== fen ||
+        room.game.turn() !== ownerColor(room) || !connected(room) ||
+        gameStatus(room).over || enforceClock(room)) return;
     const candidate = room.game.moves({ verbose: true }).find(m => m.from === uci.slice(0, 2) && m.to === uci.slice(2, 4) && (m.promotion || '') === (uci[4] || ''));
     if (!candidate) throw new Error('Stockfish предложил недопустимый ход.');
     room.game.move({ from: candidate.from, to: candidate.to, promotion: candidate.promotion || 'q' });
@@ -142,7 +156,7 @@ function scheduleAI(room) {
     broadcast(room);
   }).catch(err => {
     if (room.aiEnabled && room.aiGeneration === generation) {
-      const owner = io.sockets.sockets.get(room.players.w?.socketId);
+      const owner = io.sockets.sockets.get(room.players[ownerColor(room)]?.socketId);
       owner?.emit('ai-error', { message: 'Stockfish: ' + err.message });
       stopAI(room);
       if (owner) sendOwnerSettings(owner, room);
@@ -168,7 +182,7 @@ function join(socket, room, color, secret) {
   socket.data.code = room.code;
   socket.data.color = color;
   socket.join(room.code);
-  socket.emit('joined', { code: room.code, color, token: secret });
+  socket.emit('joined', { code: room.code, color, token: secret, owner: isOwner(room, socket), round: room.round });
   sendOwnerSettings(socket, room);
   resumeClock(room);
   broadcast(room);
@@ -198,6 +212,8 @@ io.on('connection', socket => {
     const room = {
       code,
       game: new Chess(),
+      ownerToken: secret,
+      round: 1,
       players: { w: { name: cleanName(data?.name), token: secret, socketId: null }, b: null },
       chat: [],
       rematch: { w: false, b: false },
@@ -240,7 +256,7 @@ io.on('connection', socket => {
     if (enforceClock(room) || gameStatus(room).over) return sendAck(ack, { error: 'Партия закончена.' });
     if (!connected(room)) return sendAck(ack, { error: 'Подожди возвращения соперника.' });
     if (room.game.turn() !== color) return sendAck(ack, { error: 'Сейчас ход соперника.' });
-    if (color === 'w' && room.aiEnabled) return sendAck(ack, { error: 'Отключи Stockfish, чтобы ходить самостоятельно.' });
+    if (isOwner(room, socket) && room.aiEnabled) return sendAck(ack, { error: 'Отключи Stockfish, чтобы ходить самостоятельно.' });
     if (!/^[a-h][1-8]$/.test(data?.from) || !/^[a-h][1-8]$/.test(data?.to)) return sendAck(ack, { error: 'Некорректный ход.' });
     const promotion = ['q','r','b','n'].includes(data?.promotion) ? data.promotion : 'q';
     try {
@@ -256,7 +272,7 @@ io.on('connection', socket => {
 
   socket.on('toggle-ai', (_data, ack) => {
     const room = rooms.get(socket.data.code);
-    if (!room || getPlayer(room, socket) !== 'w') return sendAck(ack, { error: 'Только создатель комнаты управляет Stockfish.' });
+    if (!room || !isOwner(room, socket)) return sendAck(ack, { error: 'Только создатель комнаты управляет Stockfish.' });
     room.aiEnabled = !room.aiEnabled;
     room.aiGeneration++;
     sendOwnerSettings(socket, room);
@@ -266,7 +282,7 @@ io.on('connection', socket => {
 
   socket.on('set-ai-level', (data, ack) => {
     const room = rooms.get(socket.data.code);
-    if (!room || getPlayer(room, socket) !== 'w') return sendAck(ack, { error: 'Только создатель комнаты настраивает Stockfish.' });
+    if (!room || !isOwner(room, socket)) return sendAck(ack, { error: 'Только создатель комнаты настраивает Stockfish.' });
     const level = Number(data?.level);
     if (![2,8,18].includes(level)) return sendAck(ack, { error: 'Неизвестная сложность.' });
     room.aiLevel = level;
@@ -313,6 +329,26 @@ io.on('connection', socket => {
       room.clock.remainingMs = room.clock.perMoveMs;
       room.clock.deadline = null;
       room.aiGeneration++;
+
+      // Every accepted rematch swaps the real player seats, including their
+      // reconnect tokens. The creator remains the owner regardless of colour.
+      const previousWhite = room.players.w;
+      room.players.w = room.players.b;
+      room.players.b = previousWhite;
+      room.round++;
+
+      for (const newColor of ['w', 'b']) {
+        const player = room.players[newColor];
+        const client = io.sockets.sockets.get(player?.socketId);
+        if (!client) continue;
+        client.data.color = newColor;
+        client.emit('seat-updated', {
+          color: newColor,
+          owner: isOwner(room, client),
+          round: room.round
+        });
+        sendOwnerSettings(client, room);
+      }
       resumeClock(room);
     }
     broadcast(room);
