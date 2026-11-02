@@ -108,6 +108,10 @@ function pump() {
 
 function bestMove(fen, level = 8) {
   return new Promise((resolve, reject) => {
+    if (queue.length >= 32) {
+      reject(new Error('Очередь Stockfish заполнена. Повтори позже.'));
+      return;
+    }
     try { start(); } catch (error) { reject(error); return; }
     const safeLevel = [2, 8, 18].includes(level) ? level : 8;
     queue.push({ fen, level: safeLevel, moveTime: safeLevel === 2 ? 250 : safeLevel === 8 ? 500 : 950, resolve, reject, timer: null });
@@ -116,4 +120,5 @@ function bestMove(fen, level = 8) {
 }
 
 process.on('exit', () => { if (engine) try { engine.kill(); } catch (_) {} });
-module.exports = { bestMove };
+module.exports = { bestMove, shutdown: () => fail(new Error('Stockfish остановлен.')) };
+

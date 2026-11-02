@@ -20,7 +20,7 @@ const INVITE_LIFETIME_MS = 45000;
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-function cleanName(value) { return String(value || '').trim().slice(0, 24) || 'Игрок'; }
+const AI_LEVELS = { 2: 'Новичок', 8: 'Средний', 18: 'Сильный' };
 function codeForRoom() {
   // Six easy-to-read characters; no 0/O or 1/I confusion.
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -34,7 +34,8 @@ function secretToken() { return crypto.randomBytes(24).toString('hex'); }
 
 function nicknameKey(value) { return value.toLocaleLowerCase('ru'); }
 function validateNickname(value) {
-  const name = String(value ?? '').trim();
+  if (typeof value !== 'string') return { error: 'Ник должен быть строкой.' };
+  const name = value.trim();
   if (!/^[\p{L}\p{N}_-]{2,24}$/u.test(name)) {
     return { error: 'Ник: от 2 до 24 символов (буквы, цифры, _ или -), без пробелов.' };
   }
@@ -57,6 +58,22 @@ function registerNickname(socket, value) {
   socket.emit('nickname-ready', { name: parsed.name });
   return { ok:true, name:parsed.name };
 }
+function releaseNickname(socket) {
+  if (nicknameOwners.get(socket.data.nicknameKey) === socket.id) {
+    nicknameOwners.delete(socket.data.nicknameKey);
+  }
+  socket.data.nicknameKey = null;
+  socket.data.nickname = null;
+}
+function restoreNickname(socket, player) {
+  // The room token authenticates the seat. A temporary public nickname must
+  // never block recovery, nor may recovery take a nickname from another user.
+  const previous = io.sockets.sockets.get(player.socketId);
+  if (previous && previous.id !== socket.id) releaseNickname(previous);
+  const registered = registerNickname(socket, player.name);
+  if (registered.error) socket.emit('nickname-unavailable', { message:
+    'Место в партии восстановлено. Старый ник занят; выбери другой в главном меню.' });
+}
 function closeInvite(invite, senderMessage = null, notifyTarget = false) {
   if (!invite || !pendingInvites.has(invite.id)) return;
   pendingInvites.delete(invite.id);
@@ -74,21 +91,25 @@ function cancelInvitesFor(socketId) {
     }
   }
 }
-function createRoomFor(socket, name, requestedTime) {
+function createRoomFor(socket, name, requestedTime, aiLevel = null) {
   const code = codeForRoom(), secret = secretToken();
-  const duration = [30000, 60000, 120000].includes(Number(requestedTime)) ? Number(requestedTime) : 60000;
+  const duration = [30000, 60000, 120000].includes(requestedTime) ? requestedTime : 60000;
+  const vsAI = aiLevel !== null;
   const room = {
     code,
     game: new Chess(),
     ownerToken: secret,
     round: 1,
-    players: { w:{ name, token:secret, socketId:null }, b:null },
+    mode: vsAI ? 'ai' : 'friend',
+    players: { w:{ name, token:secret, socketId:null }, b:vsAI ? {
+      name: 'Stockfish · ' + AI_LEVELS[aiLevel], isBot:true, token:null, socketId:null
+    } : null },
     chat: [],
     rematch: { w:false, b:false },
     result: null,
     freedom: null,
-    aiEnabled: false,
-    aiLevel: 8,
+    aiLevel: vsAI ? aiLevel : null,
+    aiError: null,
     aiPending: false,
     aiGeneration: 0,
     clock: { perMoveMs:duration, remainingMs:duration, deadline:null },
@@ -100,14 +121,19 @@ function createRoomFor(socket, name, requestedTime) {
 }
 function sendAck(ack, data) { if (typeof ack === 'function') ack(data); }
 function playerView(player) {
-  return player ? { name: player.name, online: Boolean(player.socketId) } : null;
+  return player ? { name: player.name, online: !!(player.isBot || player.socketId), isBot:!!player.isBot } : null;
 }
 function getPlayer(room, socket) {
   if (room?.players.w?.socketId === socket.id) return 'w';
   if (room?.players.b?.socketId === socket.id) return 'b';
   return null;
 }
-function connected(room) { return !!(room.players.w?.socketId && room.players.b?.socketId); }
+function connected(room) {
+  return ['w', 'b'].every(color => room.players[color]?.isBot || room.players[color]?.socketId);
+}
+function botColor(room) {
+  return ['w', 'b'].find(color => room.players[color]?.isBot) || null;
+}
 // Room creator is identified by a secret token, never by piece colour.
 function ownerColor(room) {
   if (room.players.w?.token === room.ownerToken) return 'w';
@@ -383,8 +409,7 @@ function view(room) {
     players: { w: playerView(room.players.w), b: playerView(room.players.b) },
     moves: room.freedom ? room.freedom.moves : room.game.history(),
     captures: freeCaptureHistory(room),
-    // Freedom moves are calculated client-side for highlighting and
-    // individually validated on the server to avoid huge payloads.
+    // Both the highlights and move validation use server-calculated moves.
     legal: room.freedom
       ? freePseudoMoves(room.freedom).map(move => ({ from: move.from, to: move.to, promotion: move.promotion }))
       : room.game.moves({ verbose: true }).map(move => ({ from: move.from, to: move.to, promotion: move.promotion || '' })),
@@ -392,7 +417,10 @@ function view(room) {
     rematch: { ...room.rematch },
     clock: clockView(room),
     round: room.round,
-    freedom: !!room.freedom
+    freedom: !!room.freedom,
+    mode: room.mode,
+    bot: room.mode === 'ai' ? { color:botColor(room), level:room.aiLevel,
+      thinking:room.aiPending, error:room.aiError } : null
   };
 }
 function broadcast(room) {
@@ -400,14 +428,8 @@ function broadcast(room) {
   io.to(room.code).emit('game-state', view(room));
   scheduleAI(room);
 }
-function sendOwnerSettings(socket, room) {
-  if (isOwner(room, socket)) {
-    socket.emit('ai-state', { enabled: room.aiEnabled, level: room.aiLevel });
-  }
-}
 function stopAI(room) {
   room.aiGeneration++;
-  room.aiEnabled = false;
 }
 function pauseClock(room) {
   if (room.clock.deadline !== null) {
@@ -416,17 +438,18 @@ function pauseClock(room) {
   }
 }
 function resumeClock(room) {
-  if (room.freedom || gameStatus(room).over || !connected(room) || room.clock.deadline !== null) return;
+  if (room.freedom || room.aiError || gameStatus(room).over || !connected(room) || room.clock.deadline !== null) return;
   room.clock.deadline = Date.now() + room.clock.remainingMs;
 }
 function endGame(room, result) {
   pauseClock(room);
   room.result = { over: true, ...result };
+  room.aiError = null;
   stopAI(room);
   broadcast(room);
 }
 function enforceClock(room) {
-  if (room.freedom || !room.clock.deadline || gameStatus(room).over || !connected(room)) return false;
+  if (room.freedom || room.aiError || !room.clock.deadline || gameStatus(room).over || !connected(room)) return false;
   if (Date.now() < room.clock.deadline) return false;
   const loser = room.game.turn();
   room.clock.remainingMs = 0;
@@ -443,15 +466,15 @@ function nextTurnClock(room) {
   if (!gameStatus(room).over) resumeClock(room);
 }
 function scheduleAI(room) {
-  if (room.freedom || !room.aiEnabled || room.aiPending || !connected(room) ||
-      room.game.turn() !== ownerColor(room) || gameStatus(room).over) return;
+  if (room.mode !== 'ai' || room.freedom || room.aiError || room.aiPending || !connected(room) ||
+      room.game.turn() !== botColor(room) || gameStatus(room).over) return;
   const fen = room.game.fen();
   const generation = room.aiGeneration;
   const level = room.aiLevel;
   room.aiPending = true;
   bestMove(fen, level).then(uci => {
-    if (!room.aiEnabled || room.aiGeneration !== generation || room.game.fen() !== fen ||
-        room.game.turn() !== ownerColor(room) || !connected(room) ||
+    if (room.mode !== 'ai' || room.aiGeneration !== generation || room.game.fen() !== fen ||
+        room.game.turn() !== botColor(room) || !connected(room) ||
         gameStatus(room).over || enforceClock(room)) return;
     const candidate = room.game.moves({ verbose: true }).find(m => m.from === uci.slice(0, 2) && m.to === uci.slice(2, 4) && (m.promotion || '') === (uci[4] || ''));
     if (!candidate) throw new Error('Stockfish предложил недопустимый ход.');
@@ -459,15 +482,15 @@ function scheduleAI(room) {
     nextTurnClock(room);
     broadcast(room);
   }).catch(err => {
-    if (room.aiEnabled && room.aiGeneration === generation) {
-      const owner = io.sockets.sockets.get(room.players[ownerColor(room)]?.socketId);
-      owner?.emit('ai-error', { message: 'Stockfish: ' + err.message });
-      stopAI(room);
-      if (owner) sendOwnerSettings(owner, room);
+    if (room.mode === 'ai' && room.aiGeneration === generation && !gameStatus(room).over) {
+      console.error('Stockfish:', err.message);
+      pauseClock(room);
+      room.aiError = 'Stockfish временно недоступен. Повтори попытку через несколько секунд.';
+      broadcast(room);
     }
   }).finally(() => {
     room.aiPending = false;
-    if (room.aiEnabled && room.aiGeneration !== generation) scheduleAI(room);
+    if (room.mode === 'ai') broadcast(room);
   });
 }
 function join(socket, room, color, secret) {
@@ -476,6 +499,7 @@ function join(socket, room, color, secret) {
   if (oldId && oldId !== socket.id) {
     const previous = io.sockets.sockets.get(oldId);
     if (previous) {
+      cancelInvitesFor(previous.id);
       previous.leave(room.code);
       previous.data.code = null;
       previous.data.color = null;
@@ -487,7 +511,6 @@ function join(socket, room, color, secret) {
   socket.data.color = color;
   socket.join(room.code);
   socket.emit('joined', { code: room.code, color, token: secret, owner: isOwner(room, socket), round: room.round });
-  sendOwnerSettings(socket, room);
   resumeClock(room);
   broadcast(room);
   return true;
@@ -499,6 +522,7 @@ function leave(socket, sendResponse = true) {
   const color = getPlayer(room, socket);
   if (color) {
     pauseClock(room);
+    stopAI(room);
     room.players[color].socketId = null;
     socket.leave(room.code);
     socket.data.code = null;
@@ -527,18 +551,38 @@ io.on('connection', socket => {
     sendAck(ack, { ok:true });
   });
 
+  socket.on('create-ai-game', (data, ack) => {
+    if (socket.data.code) return sendAck(ack, { error:'Сначала выйди в главное меню.' });
+    if (![2, 8, 18].includes(data?.level)) return sendAck(ack, { error:'Выбери сложность Stockfish.' });
+    const registered = registerNickname(socket, data?.name || socket.data.nickname || 'Игрок');
+    if (registered.error) return sendAck(ack, registered);
+    cancelInvitesFor(socket.id);
+    createRoomFor(socket, registered.name, data?.moveTimeMs, data.level);
+    sendAck(ack, { ok:true });
+  });
+
   socket.on('join-room', (data, ack) => {
-    const code = String(data?.code || '').trim().toUpperCase();
+    if (typeof data?.code !== 'string') return sendAck(ack, { error:'Некорректный код комнаты.' });
+    const code = data.code.trim().toUpperCase();
     const room = rooms.get(code);
     if (!room) return sendAck(ack, { error: 'Комната не найдена. После перезапуска сервера старые комнаты исчезают.' });
     if (socket.data.code && socket.data.code !== code) return sendAck(ack, { error: 'Сначала выйди в главное меню.' });
-    const supplied = String(data?.token || '');
-    const known = ['w', 'b'].find(c => room.players[c]?.token === supplied);
+    const existing = getPlayer(room, socket);
+    if (existing) {
+      join(socket, room, existing, room.players[existing].token);
+      return sendAck(ack, { ok:true });
+    }
+    const supplied = typeof data?.token === 'string' ? data.token : '';
+    const known = supplied && ['w', 'b'].find(c => !room.players[c]?.isBot && room.players[c]?.token === supplied);
+    if (room.mode === 'ai' && !known) return sendAck(ack, { error:'Это одиночная партия против Stockfish.' });
     const color = known || (!room.players.b ? 'b' : null);
     if (!color) return sendAck(ack, { error: 'Оба места уже заняты.' });
-    const joinName = known ? room.players[color].name : (data?.name || socket.data.nickname || 'Игрок');
-    const registered = registerNickname(socket, joinName);
-    if (registered.error) return sendAck(ack, registered);
+    let registered;
+    if (known) restoreNickname(socket, room.players[color]);
+    else {
+      registered = registerNickname(socket, data?.name || socket.data.nickname || 'Игрок');
+      if (registered.error) return sendAck(ack, registered);
+    }
     cancelInvitesFor(socket.id);
     if (!room.players[color]) room.players[color] = { name: registered.name, token: secretToken(), socketId: null };
     join(socket, room, color, room.players[color].token);
@@ -574,7 +618,10 @@ io.on('connection', socket => {
     if (room && gameStatus(room).over) {
       return sendAck(ack, { error:'Партия уже завершена. Создай новую комнату.' });
     }
-    if (!room) room = createRoomFor(socket, registered.name, data?.moveTimeMs);
+    if (!room) {
+      cancelInvitesFor(socket.id);
+      room = createRoomFor(socket, registered.name, data?.moveTimeMs);
+    }
 
     const invite = {
       id:secretToken(), senderId:socket.id, targetId:target.id,
@@ -596,7 +643,7 @@ io.on('connection', socket => {
   });
 
   socket.on('invite-reply', (data, ack) => {
-    const invite = pendingInvites.get(String(data?.id || ''));
+    const invite = typeof data?.id === 'string' ? pendingInvites.get(data.id) : null;
     if (!invite || invite.targetId !== socket.id) {
       return sendAck(ack, { error:'Приглашение уже недействительно.' });
     }
@@ -640,8 +687,8 @@ io.on('connection', socket => {
     if ((room.freedom ? room.freedom.turn : room.game.turn()) !== color) {
       return sendAck(ack, { error: 'Сейчас ход соперника.' });
     }
-    if (isOwner(room, socket) && room.aiEnabled) return sendAck(ack, { error: 'Отключи Stockfish, чтобы ходить самостоятельно.' });
-    if (!/^[a-h][1-8]$/.test(data?.from) || !/^[a-h][1-8]$/.test(data?.to)) return sendAck(ack, { error: 'Некорректный ход.' });
+    if (typeof data?.from !== 'string' || typeof data?.to !== 'string' ||
+        !/^[a-h][1-8]$/.test(data.from) || !/^[a-h][1-8]$/.test(data.to)) return sendAck(ack, { error: 'Некорректный ход.' });
     const promotion = ['q','r','b','n'].includes(data?.promotion) ? data.promotion : 'q';
     try {
       if (room.freedom) {
@@ -665,22 +712,24 @@ io.on('connection', socket => {
     if (!room || !isOwner(room, socket)) {
       return sendAck(ack, { error: 'Включать режим свободы может только создатель лобби.' });
     }
+    if (room.mode === 'ai') return sendAck(ack, { error:'Свобода хода доступна только в партии с другом: Stockfish играет по обычным правилам.' });
     const desired = data?.enabled === true;
     if (desired === !!room.freedom) return sendAck(ack, { ok: true });
     if (desired) {
       pauseClock(room);
+      const fen = room.game.fen({ forceEnpassantSquare:true });
+      const [, , castling, ep] = fen.split(' ');
       room.freedom = {
-        board: freeBoardFromFen(room.game.fen()),
+        board: freeBoardFromFen(fen),
         turn: room.game.turn(),
         moves: room.game.history(),
         captures: capturedPieces(room),
-        castling: room.game.fen().split(' ')[2].replace('-', ''),
-        ep: room.game.fen().split(' ')[3] === '-' ? null : room.game.fen().split(' ')[3]
+        castling: castling.replace('-', ''),
+        ep: ep === '-' ? null : ep
       };
       room.result = null; // Keep playing even after checkmate / time loss.
       room.rematch = { w: false, b: false };
       stopAI(room);
-      sendOwnerSettings(socket, room);
     } else {
       room.freedom = null;
       room.game = new Chess();
@@ -689,41 +738,47 @@ io.on('connection', socket => {
       stopAI(room);
       room.clock.remainingMs = room.clock.perMoveMs;
       room.clock.deadline = null;
-      sendOwnerSettings(socket, room);
       resumeClock(room);
     }
     broadcast(room);
     sendAck(ack, { ok: true });
   });
 
+  // Explicitly reject obsolete clients: there is no engine assistance in PvP.
   socket.on('toggle-ai', (_data, ack) => {
-    const room = rooms.get(socket.data.code);
-    if (!room || !isOwner(room, socket)) return sendAck(ack, { error: 'Только создатель комнаты управляет Stockfish.' });
-    if (room.freedom) return sendAck(ack, { error: 'Stockfish недоступен в режиме свободы хода.' });
-    room.aiEnabled = !room.aiEnabled;
-    room.aiGeneration++;
-    sendOwnerSettings(socket, room);
-    scheduleAI(room);
-    sendAck(ack, { ok: true });
+    sendAck(ack, { error:'ИИ-помощник удалён. Выбери игру против Stockfish в главном меню.' });
   });
 
   socket.on('set-ai-level', (data, ack) => {
     const room = rooms.get(socket.data.code);
-    if (!room || !isOwner(room, socket)) return sendAck(ack, { error: 'Только создатель комнаты настраивает Stockfish.' });
-    const level = Number(data?.level);
+    if (!room || room.mode !== 'ai' || !isOwner(room, socket)) return sendAck(ack, { error:'Сложность доступна только в своей партии против Stockfish.' });
+    const level = data?.level;
     if (![2,8,18].includes(level)) return sendAck(ack, { error: 'Неизвестная сложность.' });
+    if (room.aiLevel === level) return sendAck(ack, { ok:true });
     room.aiLevel = level;
+    room.players[botColor(room)].name = 'Stockfish · ' + AI_LEVELS[level];
     room.aiGeneration++;
-    sendOwnerSettings(socket, room);
-    scheduleAI(room);
+    broadcast(room);
     sendAck(ack, { ok: true });
+  });
+
+  socket.on('retry-ai', (_data, ack) => {
+    const room = rooms.get(socket.data.code);
+    if (!room || room.mode !== 'ai' || !isOwner(room, socket) || !room.aiError) {
+      return sendAck(ack, { error:'Повторный запуск сейчас недоступен.' });
+    }
+    room.aiError = null;
+    resumeClock(room);
+    broadcast(room);
+    sendAck(ack, { ok:true });
   });
 
   socket.on('chat', (data, ack) => {
     const room = rooms.get(socket.data.code);
     const color = room && getPlayer(room, socket);
     if (!room || !color) return sendAck(ack, { error: 'Сначала войди в комнату.' });
-    const message = String(data?.message || '').trim().slice(0, 350);
+    if (typeof data?.message !== 'string') return sendAck(ack, { error:'Сообщение должно быть строкой.' });
+    const message = data.message.trim().slice(0, 350);
     if (!message) return sendAck(ack, { error: 'Напиши сообщение.' });
     if (socket.data.lastChat && Date.now() - socket.data.lastChat < 500) return sendAck(ack, { error: 'Слишком быстро.' });
     socket.data.lastChat = Date.now();
@@ -749,9 +804,11 @@ io.on('connection', socket => {
     if (room.freedom) return sendAck(ack, { error: 'Для новой партии отключи свободу хода в настройках.' });
     if (!gameStatus(room).over) return sendAck(ack, { error: 'Завершите партию.' });
     room.rematch[color] = true;
+    if (room.mode === 'ai') room.rematch[botColor(room)] = true;
     if (room.rematch.w && room.rematch.b) {
       room.game = new Chess();
       room.result = null;
+      room.aiError = null;
       room.chat = [];
       room.rematch = { w: false, b: false };
       room.clock.remainingMs = room.clock.perMoveMs;
@@ -775,7 +832,6 @@ io.on('connection', socket => {
           owner: isOwner(room, client),
           round: room.round
         });
-        sendOwnerSettings(client, room);
       }
       resumeClock(room);
     }
@@ -785,9 +841,7 @@ io.on('connection', socket => {
 
   socket.on('disconnect', () => {
     leave(socket, false);
-    if (socket.data.nicknameKey && nicknameOwners.get(socket.data.nicknameKey) === socket.id) {
-      nicknameOwners.delete(socket.data.nicknameKey);
-    }
+    releaseNickname(socket);
   });
 });
 
@@ -804,4 +858,15 @@ const cleanup = setInterval(() => {
 cleanup.unref();
 
 const port = Number(process.env.PORT) || 3000;
-server.listen(port, '0.0.0.0', () => console.log(`ChessZone: http://localhost:${port}`));
+if (require.main === module) {
+  server.listen(port, '0.0.0.0', () => console.log(`ChessZone: http://localhost:${port}`));
+}
+module.exports = { server, io, rooms, gameStatus, freePseudoMoves, moveFreely,
+  close: () => {
+    clearInterval(ticker);
+    clearInterval(cleanup);
+    for (const invite of [...pendingInvites.values()]) closeInvite(invite);
+    return new Promise(resolve => io.close(resolve));
+  }
+};
+

@@ -7,7 +7,6 @@ let isRoomOwner = false;
 let selected = null;
 let pendingPromotion = null;
 let roomCode = null;
-let aiEnabled = false;
 let activeIncomingInvite = null;
 let clockOffset = 0;
 const soundPrefs = {
@@ -131,12 +130,6 @@ function updateMySeat({ color, owner }) {
   pendingPromotion = null;
   $('#promotion').classList.add('hidden');
 
-  // Owner-only AI controls stay with the creator after colour swaps.
-  $('#ai-toggle').classList.toggle('hidden', !isRoomOwner);
-  $('#owner-ai-level').classList.toggle('hidden', !isRoomOwner);
-  $('#freedom-settings').classList.toggle('hidden', !isRoomOwner);
-  if (!isRoomOwner) aiEnabled = false;
-
   const other = color === 'w' ? 'b' : 'w';
   $('#my-color').textContent = color === 'w' ? 'Белые' : 'Чёрные';
   $('#opponent-color').textContent = other === 'w' ? 'Белые' : 'Чёрные';
@@ -172,6 +165,12 @@ function createRoom() {
   socket.emit('create-room', { name, moveTimeMs: Number($('#move-time').value) }, response => { if (response?.error) toast(response.error); });
 }
 $('#create').addEventListener('click', createRoom);
+$('#play-ai').addEventListener('click', () => {
+  const name = $('#name').value.trim() || 'Игрок';
+  socket.emit('create-ai-game', {
+    name, level:Number($('#solo-ai-level').value), moveTimeMs:Number($('#move-time').value)
+  }, response => { if (response?.error) toast(response.error); });
+});
 $('#join').addEventListener('click', () => submitJoin($('#room-input').value));
 $('#room-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitJoin(e.target.value); });
 $('#name').value = localStorage.getItem('chesszone:name') || '';
@@ -198,6 +197,10 @@ socket.on('nickname-ready', ({ name }) => {
   $('#name').value = name;
   localStorage.setItem('chesszone:name', name);
   showNicknameStatus('✓ Онлайн под ником '+name+'. Тебя можно пригласить.');
+});
+socket.on('nickname-unavailable', ({ message }) => {
+  showNicknameStatus(message, true);
+  toast(message);
 });
 
 function showInviteStatus(message) {
@@ -265,7 +268,11 @@ socket.on('disconnect', () => {
   showNicknameStatus('Нет подключения к серверу.', true);
   closeIncomingInvite();
 });
-socket.on('session-replaced', () => toast('Эта партия открылась в другой вкладке.'));
+socket.on('session-replaced', () => {
+  showLobby();
+  showNicknameStatus('Партия и ник перенесены в другую вкладку.', true);
+  toast('Эта партия открылась в другой вкладке.');
+});
 socket.on('joined', enterRoom);
 socket.on('seat-updated', next => {
   updateMySeat(next);
@@ -273,14 +280,6 @@ socket.on('seat-updated', next => {
   toast('Новая партия №' + next.round + ': теперь ты играешь ' +
     (next.color === 'w' ? 'белыми' : 'чёрными') + '.');
 });
-socket.on('ai-state', ({ enabled, level }) => {
-  if (!isRoomOwner) return;
-  aiEnabled = !!enabled;
-  $('#ai-toggle').textContent = aiEnabled ? '🤖 Stockfish: включён' : '🤖 Stockfish: выключен';
-  if ([2, 8, 18].includes(Number(level))) $('#ai-level').value = String(level);
-  renderBoard();
-});
-socket.on('ai-error', ({ message }) => toast(message));
 socket.on('game-state', next => {
   const previous = state;
   if (next.clock) clockOffset = next.clock.serverTime - Date.now();
@@ -354,7 +353,8 @@ function renderCapturedPieces() {
 }
 
 function isMyTurn() {
-  return state && state.turn === seat && state.players.w && state.players.b && !state.status.over && !aiEnabled && socket.connected;
+  return state && state.turn === seat && state.players.w?.online && state.players.b?.online &&
+    !state.status.over && !state.bot?.error && socket.connected;
 }
 function renderBoard() {
   const board = $('#board'); board.replaceChildren();
@@ -407,21 +407,32 @@ function promote(from, to) {
 $('#cancel-promotion').addEventListener('click', () => { $('#promotion').classList.add('hidden'); pendingPromotion = null; });
 function render() {
   if (!state) return;
+  const solo = state.mode === 'ai';
+  $('#room-sharing').classList.toggle('hidden', solo);
+  $('#chat-section').classList.toggle('hidden', solo);
+  $('#solo-panel').classList.toggle('hidden', !solo);
+  $('#solo-status').textContent = state.bot?.error || (solo ? state.players[state.bot.color].name : '');
+  $('#retry-ai').classList.toggle('hidden', !state.bot?.error);
+  $('#bot-ai-level').classList.toggle('hidden', !solo || !isRoomOwner);
+  $('#freedom-settings').classList.toggle('hidden', solo || !isRoomOwner);
+  if (solo) $('#ai-level').value = String(state.bot.level);
   const them = seat === 'w' ? 'b' : 'w';
   $('#my-name').textContent = state.players[seat]?.name || 'Ты';
   $('#opponent-name').textContent = state.players[them]?.name || 'Ожидаем друга';
-  $('#opponent-online').textContent = !state.players[them] ? 'Друг ещё не зашёл' : state.players[them].online ? 'В сети' : 'Не в сети';
+  $('#opponent-online').textContent = solo ? 'Компьютерный соперник'
+    : !state.players[them] ? 'Друг ещё не зашёл' : state.players[them].online ? 'В сети' : 'Не в сети';
   $('#my-online').textContent = state.players[seat]?.online ? 'В сети' : 'Переподключение';
   $('#game-status').textContent = state.players.b ? state.status.text : 'Ожидаем второго игрока';
   $('#freedom-banner').classList.toggle('hidden', !state.freedom);
   $('#freedom-toggle').checked = !!state.freedom;
-  $('#ai-toggle').disabled = !!state.freedom;
   $('#match-number').textContent = 'Партия №' + (state.round || 1);
   $('#turn-banner').textContent = !state.players.b
     ? 'Ожидание второго игрока'
     : state.status.over ? state.status.text
+      : state.bot?.error ? 'Пауза — Stockfish временно недоступен'
       : state.freedom ? '∞ Свобода хода · ' + (state.turn === seat ? 'твой ход' : 'ход соперника')
         : state.clock?.paused ? 'Пауза — ожидаем подключения игрока'
+        : solo && state.turn === state.bot.color ? 'Stockfish обдумывает ход…'
         : (state.turn === seat ? '● Твой ход' : '● Ход соперника') + ' · ' + (state.turn === 'w' ? 'ходят белые' : 'ходят чёрные');
   $('#turn-banner').classList.toggle('your-turn', !state.status.over &&
     !!state.players.b && (state.freedom || !state.clock?.paused) && state.turn === seat);
@@ -438,7 +449,7 @@ function render() {
   chat.scrollTop=chat.scrollHeight;
   $('#resign').disabled = !state.players.b || state.status.over || !!state.freedom;
   $('#rematch').classList.toggle('hidden', !state.status.over || !!state.freedom);
-  $('#rematch').textContent = state.rematch[seat] ? 'Ожидаем согласия друга…' : 'Сыграть ещё раз';
+  $('#rematch').textContent = !solo && state.rematch[seat] ? 'Ожидаем согласия друга…' : 'Сыграть ещё раз';
   $('#rematch').disabled = !!state.rematch[seat];
   renderCapturedPieces();
   renderBoard();
@@ -462,12 +473,8 @@ $('#rematch').addEventListener('click', () => {
   socket.emit('rematch', {}, response => { if(response?.error) toast(response.error); });
 });
 
-// Кнопка существует на странице, но показывается только создателю комнаты.
-$('#ai-toggle').addEventListener('click', () => {
-  if (!isRoomOwner) return;
-  socket.emit('toggle-ai', {}, response => {
-    if (response?.error) toast(response.error);
-  });
+$('#retry-ai').addEventListener('click', () => {
+  socket.emit('retry-ai', {}, response => { if (response?.error) toast(response.error); });
 });
 
 
@@ -549,7 +556,6 @@ function showLobby() {
   seat = null;
   isRoomOwner = false;
   state = null;
-  aiEnabled = false;
   selected = null;
   history.replaceState(null, '', location.pathname);
   $('#room-input').value = '';
@@ -646,3 +652,4 @@ $('#random-theme').addEventListener('click', () => {
   setTheme(available[Math.floor(Math.random() * available.length)] || defaultTheme);
 });
 $('#reset-theme').addEventListener('click', () => setTheme(defaultTheme));
+

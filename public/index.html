@@ -10,13 +10,13 @@
 <body>
   <header class="header">
     <div class="brand"><span class="brand-mark">♞</span><span>Chess<span class="pink">Zone</span></span></div>
-    <div class="header-right"><span id="connection" class="connection">Подключение…</span><span class="badge">Онлайн • 2 игрока</span></div>
+    <div class="header-right"><span id="connection" class="connection">Подключение…</span><span class="badge">С другом или против ИИ</span></div>
   </header>
   <main class="container">
     <section class="intro">
       <div class="eyebrow">ИГРАЙТЕ ВМЕСТЕ</div>
       <h1>Шахматы, где вы <em>встречаетесь</em>.</h1>
-      <p>Создай комнату, пригласи друга и играй прямо в браузере. Без регистрации и сложных настроек.</p>
+      <p>Пригласи друга или сыграй против Stockfish. Прямо в браузере, без регистрации.</p>
     </section>
 
     <section id="lobby" class="lobby card">
@@ -30,6 +30,14 @@
         </div>
       </div>
       <div class="field time-select-field"><label for="move-time">Время на каждый ход</label><select id="move-time"><option value="30000">30 секунд</option><option value="60000" selected>1 минута</option><option value="120000">2 минуты</option></select></div>
+      <section class="solo-game-box" aria-label="Игра против компьютера">
+        <div><h3>♟ Сыграть против Stockfish</h3><p>Выбери сложность и начни партию. Первый ход твой.</p></div>
+        <div class="solo-game-controls">
+          <label for="solo-ai-level">Сложность</label>
+          <select id="solo-ai-level"><option value="2">Новичок</option><option value="8" selected>Средний</option><option value="18">Сильный</option></select>
+          <button class="btn primary" id="play-ai" type="button">Играть против ИИ</button>
+        </div>
+      </section>
       <div class="lobby-actions"><button class="btn primary" id="create">＋ Создать комнату</button><span class="or">или</span><input id="room-input" aria-label="Код комнаты" maxlength="6" placeholder="6 символов" /><button class="btn secondary" id="join">Присоединиться</button></div>
       <section class="nickname-invite-box" aria-label="Пригласить друга по никнейму">
         <h3>✉ Пригласить друга по никнейму</h3>
@@ -67,15 +75,16 @@
           <button class="tool-btn" id="leave-to-menu" type="button" title="Главное меню">← Главное меню</button>
           <button class="tool-btn" id="open-settings" type="button" title="Настройки звука и игры">⚙ Настройки</button>
         </div>
-        <div class="panel-section room-section"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Короткий код из 6 символов. Отправь ссылку или пригласи по нику.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button>
+        <div class="panel-section room-section" id="room-sharing"><div class="tiny-label">ТВОЯ КОМНАТА</div><h2 id="room-code">—</h2><p>Короткий код из 6 символов. Отправь ссылку или пригласи по нику.</p><button class="btn primary full" id="copy-link">⧉ Скопировать приглашение</button>
           <form id="room-nickname-invite-form" class="nickname-invite-form room-invite-form">
             <input id="room-nickname-invite-target" maxlength="24" placeholder="Ник друга" aria-label="Ник друга" required spellcheck="false" />
             <button type="submit" class="btn secondary">Позвать</button>
           </form>
           <p id="room-nickname-invite-status" class="invite-feedback" role="status" aria-live="polite"></p>
         </div>
-        <div class="panel-section"><div class="tiny-label">ПАРТИЯ</div><div id="game-status" class="status">Ход белых</div><div id="moves" class="moves"><span class="muted">Пока ходов нет</span></div><div class="action-row"><button class="btn secondary hidden" id="ai-toggle">🤖 ИИ: выключен</button><button class="btn secondary" id="resign">Сдаться</button><button class="btn secondary hidden" id="rematch">Реванш</button></div></div>
-        <div class="panel-section chat-section"><div class="tiny-label">ЧАТ КОМНАТЫ</div><div id="chat-list" class="chat-list"><div class="muted">Напиши другу первое сообщение 🙂</div></div><form id="chat-form" class="chat-form"><input id="chat-text" maxlength="350" placeholder="Написать сообщение..." autocomplete="off" aria-label="Сообщение" /><button class="btn primary" aria-label="Отправить">➤</button></form></div>
+        <div class="panel-section hidden" id="solo-panel"><div class="tiny-label">ПРОТИВ КОМПЬЮТЕРА</div><p id="solo-status" role="status"></p><p class="settings-hint">Сложность соперника можно изменить в настройках.</p><button class="btn secondary hidden" id="retry-ai" type="button">Повторить ход ИИ</button></div>
+        <div class="panel-section"><div class="tiny-label">ПАРТИЯ</div><div id="game-status" class="status">Ход белых</div><div id="moves" class="moves"><span class="muted">Пока ходов нет</span></div><div class="action-row"><button class="btn secondary" id="resign">Сдаться</button><button class="btn secondary hidden" id="rematch">Реванш</button></div></div>
+        <div class="panel-section chat-section" id="chat-section"><div class="tiny-label">ЧАТ КОМНАТЫ</div><div id="chat-list" class="chat-list"><div class="muted">Сообщений пока нет</div></div><form id="chat-form" class="chat-form"><input id="chat-text" maxlength="350" placeholder="Написать сообщение..." autocomplete="off" aria-label="Сообщение" /><button class="btn primary" aria-label="Отправить">➤</button></form></div>
       </aside>
     </section>
   </main>
@@ -120,13 +129,13 @@
           <span>∞ Свобода хода</span>
           <input type="checkbox" id="freedom-toggle">
         </label>
-        <p class="settings-hint">Фигуры ходят по обычным правилам, но защищать короля от шаха необязательно. Король может зайти под удар или съесть фигуру, даже если его потом съедят. Партия продолжается после мата или взятия короля. Таймер и Stockfish отключаются.</p>
+        <p class="settings-hint">Фигуры ходят по обычным правилам, но защищать короля от шаха необязательно. Король может зайти под удар или съесть фигуру, даже если его потом съедят. Партия продолжается после мата или взятия короля. Таймер отключается. Победа над одиноким королём и ничья при двух королях сохраняются.</p>
         <p class="settings-hint"><strong>Важно:</strong> при выключении режима начинается новая обычная партия с начальной позиции.</p>
       </section>
-      <div id="owner-ai-level" class="ai-difficulty hidden">
-        <label class="setting-label" for="ai-level">Сложность Stockfish</label>
+      <div id="bot-ai-level" class="ai-difficulty hidden">
+        <label class="setting-label" for="ai-level">Сложность соперника Stockfish</label>
         <select id="ai-level"><option value="2">Новичок</option><option value="8" selected>Средний</option><option value="18">Сильный</option></select>
-        <p class="settings-hint">Изменять уровень ИИ может только создатель комнаты.</p>
+        <p class="settings-hint">Доступно в одиночной партии. Stockfish играет за соперника.</p>
       </div>
       <p class="settings-hint">Время на ход выбирается при создании комнаты. Если соперник отключился, часы останавливаются.</p>
       <div class="sound-test-actions">
@@ -152,3 +161,4 @@
   <script src="app.js"></script>
 </body>
 </html>
+

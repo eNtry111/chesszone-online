@@ -12,6 +12,13 @@
   border-radius: 12px; background: white; color: var(--ink);
 }
 .time-select-field { max-width: 240px; }
+.solo-game-box { margin-top:24px; padding:20px; border:1px solid var(--line); border-radius:16px; background:var(--paper); }
+.solo-game-box h3 { margin:0 0 6px; font-size:17px; }
+.solo-game-box p { font-size:13px; }
+.solo-game-controls { display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap; }
+.solo-game-controls label { font-size:13px; font-weight:700; }
+.solo-game-controls select { flex:1; min-width:140px; padding:11px; border:1px solid var(--line); border-radius:12px; background:white; color:var(--ink); font:inherit; }
+@media(max-width:480px) { .solo-game-controls .btn { width:100%; } }
 .panel-toolbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px; padding: 13px 17px; border-bottom: 1px solid var(--line);
@@ -308,3 +315,4 @@ body {
   border-radius: 10px;
   text-align: center;
 }
+
